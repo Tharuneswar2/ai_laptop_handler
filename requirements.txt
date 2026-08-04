@@ -1,0 +1,25 @@
+# ─── AI Laptop Voice Handler ─── Dependencies ───
+# Install: pip install -r requirements.txt
+
+# Voice — Speech-to-Text
+faster-whisper>=1.0.0
+
+# Voice — Audio recording
+sounddevice>=0.4.6
+scipy>=1.11.0
+
+# Voice — Text-to-Speech
+pyttsx3>=2.90
+
+# System monitoring
+psutil>=5.9.0
+
+# Terminal UI
+rich>=13.0.0
+
+# API server
+fastapi>=0.100.0
+uvicorn>=0.23.0
+
+# Environment variables
+python-dotenv>=1.0.0
