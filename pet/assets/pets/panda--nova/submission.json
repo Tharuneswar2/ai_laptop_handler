@@ -1,0 +1,19 @@
+{
+  "slug": "panda--nova",
+  "pet_slug": "panda",
+  "author_slug": "nova",
+  "name": "Nova Panda",
+  "author": "Nova Lab",
+  "primary_category": "Original",
+  "tags": [
+    "panda",
+    "nova",
+    "pixel"
+  ],
+  "license": "CC BY-NC 4.0",
+  "description": "A chubby black-and-white panda who loves snacks.",
+  "codex_install": {
+    "pet_json": "pet.json",
+    "spritesheet": "spritesheet.webp"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "slug": "fox--nova",
+  "pet_slug": "fox",
+  "author_slug": "nova",
+  "name": "Nova Fox",
+  "author": "Nova Lab",
+  "primary_category": "Original",
+  "tags": [
+    "fox",
+    "nova",
+    "pixel"
+  ],
+  "license": "CC BY-NC 4.0",
+  "description": "A curious little fox with a big bushy tail.",
+  "codex_install": {
+    "pet_json": "pet.json",
+    "spritesheet": "spritesheet.webp"
+  }
+}

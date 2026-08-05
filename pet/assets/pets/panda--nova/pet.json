@@ -1,0 +1,7 @@
+{
+  "id": "panda--nova",
+  "displayName": "Nova Panda",
+  "description": "A chubby black-and-white panda who loves snacks.",
+  "spritesheetPath": "spritesheet.webp",
+  "spriteVersionNumber": 1
+}

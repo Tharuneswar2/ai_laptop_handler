@@ -1,87 +1,107 @@
 """
-pet/main.py — Standalone entry point & demo launcher for Desktop Pet Engine.
+pet/main.py — Standalone entry point and demo runner.
 
-Usage:
-    python -m pet.main           # Run pet in normal idle state
-    python -m pet.main --demo    # Run automated demo sequence cycling through states
-    python -m pet.main --state listening # Start directly in specific state
+Usage::
+
+    python -m pet                       # start the default pet
+    python -m pet --pet cat             # start a specific pet pack
+    python -m pet --list                # show installed pet packs
+    python -m pet --demo                # run the automated state demo
+    python -m pet --scale 1.5           # bigger pet
 """
 
-import sys
-import time
-import signal
-import logging
+from __future__ import annotations
+
 import argparse
+import logging
+import sys
 from pathlib import Path
 
-# Ensure root project directory is in python path
-ROOT = Path(__file__).parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
+from pet.config import PetConfig, load_config  # noqa: E402
+from pet.core.pet_controller import PetController  # noqa: E402
 
-from pet.config import PetConfig
-from pet.pet_controller import PetController
-from pet.event_handler import PetState, PetEmotion
+logger = logging.getLogger(__name__)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)-15s | %(message)s",
-    datefmt="%H:%M:%S"
-)
-logger = logging.getLogger("pet.main")
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m pet",
+        description="Nova Desktop Pet Engine (Codex pet-pack compatible)",
+    )
+    parser.add_argument("--pet", default=None, help="pet pack id to load")
+    parser.add_argument("--list", action="store_true", help="list installed pet packs")
+    parser.add_argument("--demo", action="store_true", help="run the automated demo sequence")
+    parser.add_argument("--no-demo", action="store_true", help="do NOT run the demo sequence")
+    parser.add_argument("--scale", type=float, default=None, help="sprite scale (0.5 - 3.0)")
+    parser.add_argument("--config", default=None, help="path to a JSON config file")
+    return parser
 
 
 def run_demo(pet: PetController) -> None:
-    """Run an automated demo sequence demonstrating all pet features."""
-    logger.info("Starting Desktop Pet Demo Sequence...")
+    """Drive the pet through every state so its behaviour is visible."""
+    from PySide6.QtCore import QTimer
 
-    demo_steps = [
-        (0, lambda: pet.say("Hello! I am Nova, your desktop pet! 😸", duration_sec=3)),
-        (3500, lambda: (pet.set_state("listening"), pet.say("Listening for your command... 🎤"))),
-        (7000, lambda: (pet.set_state("thinking"), pet.say("Thinking & parsing intent... ⚡"))),
-        (10500, lambda: (pet.set_state("working"), pet.say("Opening Google Chrome... 💻"))),
-        (14000, lambda: (pet.set_state("happy"), pet.set_emotion("excited"), pet.say("Chrome opened successfully! 🎉"))),
-        (17500, lambda: pet.show_notification("Battery status: 85% remaining 🔋")),
-        (21000, lambda: (pet.set_state("error"), pet.set_emotion("confused"), pet.say("Oops! Command failed ❌"))),
-        (24500, lambda: (pet.sleep(), pet.say("Time for a quick nap... Zzz 😴"))),
-        (28500, lambda: pet.wake()),
-        (31500, lambda: (pet.set_state("idle"), pet.say("Ready for work! Direct me anytime! ✨"))),
+    steps: list[tuple[str, str, str]] = [
+        ("listening", "neutral", "I'm listening... say something!"),
+        ("thinking", "curious", "Hmm, let me think about that..."),
+        ("working", "neutral", "Opening VS Code"),
+        ("speaking", "happy", "Done! Anything else? 😊"),
+        ("happy", "excited", "Yay! Task completed!"),
+        ("sleeping", "sleepy", "zzz..."),
+        ("working", "confused", "Hmm, that didn't work. Retrying..."),
+        ("error", "surprised", "Oops! Something went wrong."),
+        ("idle", "neutral", ""),
     ]
 
-    for delay_ms, action in demo_steps:
-        QTimer.singleShot(delay_ms, action)
+    def play(index: int) -> None:
+        if index >= len(steps):
+            pet.wake()
+            pet.set_state("idle")
+            pet.notify("Demo finished — grab me and drag me around!")
+            return
+        state, emotion, message = steps[index]
+        pet.set_emotion(emotion)
+        if state == "sleeping":
+            pet.sleep()
+        else:
+            pet.wake()
+            pet.set_state(state)
+        if message:
+            pet.say(message, duration=4.0)
+        pet.notify(f"State: {state}")
+        QTimer.singleShot(3800, lambda i=index: play(i + 1))
+
+    QTimer.singleShot(1200, lambda: play(0))
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Desktop Pet Engine for AI Assistant")
-    parser.add_argument("--demo", action="store_true", help="Run automated demo sequence")
-    parser.add_argument("--state", type=str, default="idle", help="Initial state (idle, listening, thinking, etc.)")
-    args = parser.parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
-    config = PetConfig()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(name)s | %(message)s")
+
+    config = load_config(args.config)
+    if args.pet:
+        config = config.with_defaults(default_pet=args.pet)
+    if args.scale is not None:
+        config = config.with_defaults(scale=args.scale)
+
     pet = PetController(config)
-    pet.start()
 
-    if args.state != "idle":
-        pet.set_state(args.state)
+    if args.list:
+        for entry in pet.list_pets():
+            print(f"  {entry['id']:<40} {entry['dir']}")
+        return 0
 
-    if args.demo:
+    demo = args.demo or not args.no_demo
+    if demo:
         run_demo(pet)
     else:
-        pet.say("Nova Desktop Pet is ready! Drag me anywhere.", duration_sec=4)
+        pet.notify("Nova pet online")
 
-    # Handle Ctrl+C gracefully
-    signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
-    timer = QTimer()
-    timer.start(500)
-    timer.timeout.connect(lambda: None)  # Let Python interpreter run to catch SIGINT
-
-    logger.info("Pet loop running. Press Ctrl+C to stop.")
-    sys.exit(pet.app.exec())
+    return pet.run()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

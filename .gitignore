@@ -50,3 +50,6 @@ venv.bak/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Pet engine runtime state
+pet/data/

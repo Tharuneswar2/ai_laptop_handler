@@ -1,88 +1,155 @@
 """
 pet/config.py — Configuration for the Desktop Pet Engine.
 
-Uses dataclasses for clean, type-safe settings.
-All visual parameters are tunable from here.
+All tunable settings are collected in the :class:`PetConfig` dataclass so the
+engine can be re-configured without touching engine code.  ``load_config`` can
+read overrides from an optional JSON file (see the ``PET_CONFIG_FILE`` env var).
 """
 
+from __future__ import annotations
+
 import json
-import logging
-from dataclasses import dataclass, field, asdict
+import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
-logger = logging.getLogger(__name__)
-
-PET_DIR = Path(__file__).parent
-ASSETS_DIR = PET_DIR / "assets"
-POSITION_FILE = PET_DIR / ".pet_position.json"
+_PET_ROOT = Path(__file__).resolve().parent
+DEFAULT_ASSET_ROOT = _PET_ROOT / "assets"
 
 
 @dataclass
 class PetConfig:
-    """All configurable settings for the desktop pet."""
+    """Runtime settings for the desktop pet engine."""
 
-    # ─── Size & Position ──────────────────────────────────────────────
-    pet_size: int = 120                  # pet body diameter in pixels
-    default_x: int = -1                  # -1 = bottom-right of screen
-    default_y: int = -1
-    window_margin: int = 20              # margin from screen edges
+    # ─── Pet pack discovery ────────────────────────────────────────────
+    default_pet: str = "robot--nova"
+    """Slug (or pack directory name) of the pet loaded at startup."""
 
-    # ─── Animation ────────────────────────────────────────────────────
-    fps: int = 30                        # target frames per second
-    blink_interval_ms: int = 3000        # time between blinks
-    breathe_speed: float = 0.02          # breathing oscillation speed
-    transition_duration_ms: int = 300    # state change crossfade
+    asset_root: Path = DEFAULT_ASSET_ROOT
+    """Directory that contains the ``pets/`` folder with pet packs."""
 
-    # ─── Speech Bubble ────────────────────────────────────────────────
-    bubble_font_family: str = "Segoe UI"
-    bubble_font_size: int = 12
-    bubble_max_width: int = 250
-    bubble_padding: int = 12
-    bubble_corner_radius: int = 14
-    bubble_duration_ms: int = 3500       # auto-dismiss time
-    bubble_typing_speed_ms: int = 30     # per-character reveal
-    bubble_fade_duration_ms: int = 400
+    pets_dir: str = "pets"
+    """Name of the pet packs folder inside ``asset_root``."""
 
-    # ─── Notification ─────────────────────────────────────────────────
-    notification_duration_ms: int = 3000
-    notification_offset_y: int = -80     # above the pet
+    # ─── Rendering ─────────────────────────────────────────────────────
+    pet_size: tuple[int, int] = (192, 208)
+    """Base frame size of the pet in logical pixels (Codex v1 frame)."""
 
-    # ─── Appearance ───────────────────────────────────────────────────
-    body_color_1: str = "#7c3aed"        # gradient start (purple)
-    body_color_2: str = "#3b82f6"        # gradient end (blue)
-    eye_color: str = "#1e1b4b"           # pupil color
-    cheek_color: str = "#f472b6"         # blush color
-    mouth_color: str = "#312e81"         # mouth color
+    scale: float = 1.0
+    """Global display scale applied to the sprite."""
 
-    # ─── Behavior ─────────────────────────────────────────────────────
+    fps: int = 12
+    """Default animation speed in frames per second."""
+
     always_on_top: bool = True
-    opacity: float = 1.0                 # 0.0 – 1.0
-    sleep_after_idle_ms: int = 120_000   # auto-sleep after 2 min idle
-    draggable: bool = True
+    """Keep the pet window above all other windows."""
 
-    # ─── Paths ────────────────────────────────────────────────────────
-    assets_path: str = str(ASSETS_DIR)
-    position_file: str = str(POSITION_FILE)
+    opacity: float = 1.0
+    """Window opacity in the range 0.0 (invisible) to 1.0 (opaque)."""
 
-    def save_position(self, x: int, y: int) -> None:
-        """Persist the pet's position to disk."""
-        try:
-            data = {"x": x, "y": y}
-            Path(self.position_file).write_text(json.dumps(data))
-        except Exception as e:
-            logger.warning("Failed to save position: %s", e)
+    theme: str = "light"
+    """UI theme used for speech bubbles and notifications."""
 
-    def load_position(self) -> tuple[int, int] | None:
-        """Load the pet's last saved position."""
-        try:
-            path = Path(self.position_file)
-            if path.exists():
-                data = json.loads(path.read_text())
-                return data.get("x"), data.get("y")
-        except Exception as e:
-            logger.warning("Failed to load position: %s", e)
-        return None
+    show_in_taskbar: bool = False
+    """Show the pet window in the OS taskbar (normally hidden)."""
 
-    def to_dict(self) -> dict:
-        """Export config as a dictionary."""
-        return asdict(self)
+    dpi_scale: bool = True
+    """Scale the sprite by the screen's device pixel ratio."""
+
+    # ─── Timers ────────────────────────────────────────────────────────
+    speech_bubble_duration: float = 6.0
+    """Seconds a speech bubble stays visible before fading out."""
+
+    speech_bubble_typing_ms: int = 18
+    """Milliseconds between characters of the typing effect."""
+
+    notification_duration: float = 4.0
+    """Seconds a notification stays visible before fading out."""
+
+    autosleep_timeout: float = 300.0
+    """Seconds of inactivity (IDLE) before the pet falls asleep."""
+
+    state_timeout: float = 90.0
+    """Seconds a non-IDLE state may persist before it is force-released."""
+
+    # ─── Position persistence ──────────────────────────────────────────
+    default_position: tuple[int, int] | None = None
+    """Starting window position; ``None`` = bottom-right of the primary screen."""
+
+    position_path: Path = _PET_ROOT / "data" / "pet_position.json"
+    """JSON file used to remember the pet position between runs."""
+
+    # ─── Cross-fade ────────────────────────────────────────────────────
+    transition_ms: int = 140
+    """Duration of the sprite cross-fade when switching states."""
+
+    # ─── Convenience helpers ───────────────────────────────────────────
+
+    @property
+    def pets_root(self) -> Path:
+        """Absolute path to the folder containing pet packs."""
+        return self.asset_root / self.pets_dir
+
+    def with_defaults(self, **overrides: Any) -> "PetConfig":
+        """Return a copy of this config with ``overrides`` applied."""
+        return replace(self, **overrides)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the config to a plain dict (for save/debug)."""
+        data: dict[str, Any] = {}
+        for key, value in self.__dict__.items():
+            if isinstance(value, Path):
+                data[key] = str(value)
+            elif isinstance(value, tuple):
+                data[key] = list(value)
+            else:
+                data[key] = value
+        return data
+
+
+def load_config(path: str | os.PathLike | None = None) -> PetConfig:
+    """
+    Build a :class:`PetConfig` from JSON overrides.
+
+    Args:
+        path: Optional path to a JSON config file.  If omitted, the file
+            pointed to by the ``PET_CONFIG_FILE`` environment variable is
+            used (when set).
+
+    Returns:
+        A fully-populated :class:`PetConfig` instance.
+    """
+    config = PetConfig()
+
+    file = Path(path) if path else None
+    if file is None:
+        env = os.environ.get("PET_CONFIG_FILE", "")
+        if env:
+            file = Path(env)
+
+    if file is None or not file.exists():
+        return config
+
+    with file.open("r", encoding="utf-8") as handle:
+        raw = json.load(handle)
+
+    overrides: dict[str, Any] = {}
+    for key, value in raw.items():
+        if not hasattr(config, key):
+            continue
+        if key in ("asset_root", "position_path"):
+            value = Path(str(value))
+        elif key in ("pet_size", "default_position") and isinstance(value, list):
+            value = tuple(value)
+        overrides[key] = value
+
+    return replace(config, **overrides) if overrides else config
+
+
+def ensure_data_dir(config: PetConfig) -> None:
+    """Create the data directory used for position persistence."""
+    Path(config.position_path).parent.mkdir(parents=True, exist_ok=True)
+
+
+__all__ = ["PetConfig", "load_config", "DEFAULT_ASSET_ROOT", "ensure_data_dir"]

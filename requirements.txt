@@ -15,8 +15,9 @@ fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 websockets>=12.0
 
-# GUI — Desktop Pet Engine
+# Desktop Pet Engine (pet/ — Codex-compatible pet packs)
 PySide6>=6.5.0
+Pillow>=10.0.0
 
 # Environment variables
 python-dotenv>=1.0.0

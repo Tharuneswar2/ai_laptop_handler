@@ -1,0 +1,7 @@
+{
+  "id": "robot--nova",
+  "displayName": "Nova Bot",
+  "description": "A tiny companion robot with a glowing antenna. Built-in default pet.",
+  "spritesheetPath": "spritesheet.webp",
+  "spriteVersionNumber": 1
+}

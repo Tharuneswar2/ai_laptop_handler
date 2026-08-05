@@ -1,0 +1,19 @@
+{
+  "slug": "robot--nova",
+  "pet_slug": "robot",
+  "author_slug": "nova",
+  "name": "Nova Bot",
+  "author": "Nova Lab",
+  "primary_category": "Original",
+  "tags": [
+    "robot",
+    "nova",
+    "pixel"
+  ],
+  "license": "CC BY-NC 4.0",
+  "description": "A tiny companion robot with a glowing antenna. Built-in default pet.",
+  "codex_install": {
+    "pet_json": "pet.json",
+    "spritesheet": "spritesheet.webp"
+  }
+}
