@@ -113,6 +113,33 @@ class AnimationEngine(QObject):
         if state is not self._state:
             self._apply_state(state, restart=False)
 
+    def play_animation(self, animation: str, *, one_shot: bool = False) -> bool:
+        """
+        Play a named animation row directly (e.g. ``"running-left"`` for
+        screen movement) without changing the pet state.
+
+        Args:
+            animation: Animation row name from the atlas.
+            one_shot: Stop on the last frame when True (loops otherwise).
+
+        Returns:
+            True when the animation exists and playback started.
+        """
+        if animation not in self._frames:
+            logger.debug("No animation row %r in pack %s", animation, self._pack.id if self._pack else None)
+            return False
+        self._animation = animation
+        self._index = 0
+        self._one_shot = one_shot
+        self.state_animation_started.emit(animation)
+        self._start_timer()
+        self.frame_changed.emit()
+        return True
+
+    def restore_state_animation(self) -> None:
+        """Return to the animation of the current pet state."""
+        self._apply_state(self._state, restart=True)
+
     def restart(self) -> None:
         """Restart the current animation from its first frame."""
         self._index = 0

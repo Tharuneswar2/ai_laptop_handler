@@ -1,6 +1,6 @@
 """
-Tests for the main-app integration: external pack roots, the API observer
-hook, the GitHub fetcher validation and the pet <-> web STT bridge.
+Tests for the main-app integration: the API observer hook and the
+pet <-> web STT bridge.
 
 Run::
 
@@ -10,7 +10,6 @@ Run::
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 import tempfile
 import unittest
@@ -19,61 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pet.config import PetConfig
-from pet.core.asset_loader import AssetLoader
-from pet.tools.fetch_pets import validate_pack_dir
 
 PET_ROOT = Path(__file__).resolve().parent.parent
 BUNDLED = PET_ROOT / "assets" / "pets"
-
-
-def make_pack_dir(root: Path, name: str = "dummy--tester") -> Path:
-    """Create a minimal (invalid unless fixed up) pack directory."""
-    pack = root / name
-    pack.mkdir(parents=True, exist_ok=True)
-    return pack
-
-
-class PackRootTests(unittest.TestCase):
-    def tearDown(self) -> None:
-        os.environ.pop("PET_PACKS_DIR", None)
-
-    def test_packs_root_override_used_by_loader(self) -> None:
-        config = PetConfig(packs_root=BUNDLED)
-        loader = AssetLoader(config.asset_root, config.pets_dir, packs_root=config.packs_root)
-        pack = loader.load_pack("cat--nova")
-        self.assertEqual(pack.id, "cat--nova")
-
-    def test_pets_root_property_prefers_packs_root(self) -> None:
-        config = PetConfig(packs_root=BUNDLED)
-        self.assertEqual(config.pets_root, BUNDLED)
-
-    def test_env_override(self) -> None:
-        os.environ["PET_PACKS_DIR"] = str(BUNDLED)
-        config = PetConfig()
-        self.assertEqual(config.packs_root, BUNDLED)
-        self.assertEqual(config.pets_root, BUNDLED)
-
-
-class FetchValidationTests(unittest.TestCase):
-    def test_valid_pack_passes(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            pack = shutil.copytree(BUNDLED / "cat--nova", Path(tmp) / "cat--nova")
-            self.assertEqual(validate_pack_dir(pack), [])
-
-    def test_missing_metadata_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            pack = make_pack_dir(Path(tmp))
-            errors = validate_pack_dir(pack)
-            self.assertIn("missing pet.json", errors)
-
-    def test_missing_spritesheet_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            pack = make_pack_dir(Path(tmp))
-            (pack / "pet.json").write_text(
-                '{"id": "dummy--tester", "spritesheetPath": "missing.webp"}', encoding="utf-8"
-            )
-            errors = validate_pack_dir(pack)
-            self.assertTrue(any("spritesheet" in error for error in errors))
 
 
 class ApiObserverTests(unittest.TestCase):

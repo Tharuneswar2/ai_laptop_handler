@@ -38,6 +38,7 @@ from .asset_loader import AssetLoader, PetPack, PetPackError
 from .emotion_manager import EmotionManager, PetEmotion
 from .event_bus import EventBus, PetEvent, set_thread_hook
 from .fallback_pet import build_fallback_pack
+from .movement import MovementController
 from .state_machine import PetState, PetStateMachine, StateMachineOptions
 from ..ui.notification_widget import NotificationWidget
 from ..ui.pet_window import PetWindow
@@ -88,11 +89,7 @@ class PetController(QObject):
         set_thread_hook(self._marshal)
 
         # Engine pieces.
-        self.loader = AssetLoader(
-            self.config.asset_root,
-            self.config.pets_dir,
-            packs_root=self.config.packs_root,
-        )
+        self.loader = AssetLoader(self.config.asset_root, self.config.pets_dir)
         self.emotions = EmotionManager()
         self.state_machine = PetStateMachine(
             StateMachineOptions(state_timeout=self.config.state_timeout)
@@ -108,6 +105,7 @@ class PetController(QObject):
         self._renderer: PetRenderer | None = None
         self._bubble: SpeechBubble | None = None
         self._notifications: NotificationWidget | None = None
+        self.movement: MovementController | None = None
 
         # Timers.
         self._tick_timer = QTimer(self)
@@ -146,6 +144,8 @@ class PetController(QObject):
 
     def stop(self) -> None:
         """Hide the window and stop timers (leaves the app running)."""
+        if self.movement is not None:
+            self.movement.stop()
         if self._window is not None:
             self._window.hide_pet()
         self._tick_timer.stop()
@@ -290,6 +290,18 @@ class PetController(QObject):
         self._window = PetWindow(self._renderer, self.anim_engine, self.config)
         self._window.moved_by_drag.connect(self._on_drag_end)
 
+        self.movement = MovementController(
+            self.anim_engine,
+            self._window,
+            interval_ms=self.config.walk_interval_ms,
+            step_px=self.config.walk_step_px,
+            min_pause=self.config.min_walk_pause,
+            max_pause=self.config.max_walk_pause,
+            min_distance=self.config.min_walk_distance,
+            max_distance=self.config.max_walk_distance,
+        )
+        self.movement.set_enabled(self.config.movement_enabled)
+
         self._bubble = SpeechBubble(theme=self.config.theme)
         self._bubble.attach_to(self._window)
         self._notifications = NotificationWidget(theme=self.config.theme)
@@ -307,6 +319,8 @@ class PetController(QObject):
         self.anim_engine.set_pack(pack, scale=self.config.scale)
         self.state_machine.reset()
         self.emotions.reset()
+        if self.movement is not None:
+            self.movement.on_state_changed(self.state_machine.state)
         if self._window is not None:
             self._window.resize(self._renderer.size())
             self._window.show_pet()
@@ -316,6 +330,8 @@ class PetController(QObject):
 
     def _on_state_changed(self, previous: PetState, current: PetState) -> None:
         self.anim_engine.set_state(current)
+        if self.movement is not None:
+            self.movement.on_state_changed(current)
         self._reset_auto_sleep()
         self.event_bus.publish(_STATE_EVENT.get(current, PetEvent.PET_IDLE), {"state": current.value})
 
@@ -327,6 +343,8 @@ class PetController(QObject):
 
     def _on_tick(self) -> None:
         self.state_machine.tick(1.0)
+        if self.movement is not None:
+            self.movement.tick_second()
 
     def _reset_auto_sleep(self) -> None:
         if self.state_machine.state is PetState.IDLE:
@@ -340,6 +358,8 @@ class PetController(QObject):
             self.anim_engine.resume()
 
     def _hide_impl(self) -> None:
+        if self.movement is not None:
+            self.movement.stop()
         if self._window is not None:
             self._window.hide_pet()
 

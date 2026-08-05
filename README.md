@@ -74,8 +74,8 @@ ai-laptop-handler/
 │   └── server.py           # FastAPI REST server (+ pet observer hook)
 ├── pet/                    # Desktop pet engine (Codex-compatible packs)
 │   ├── integration.py      # pet + web STT bridge (main.py --pet)
-│   ├── assets/pets/        # Pet packs (bundled + fetched from GitHub)
-│   └── tools/fetch_pets.py # Download community packs
+│   ├── core/movement.py    # Idle wandering (run-animation movement)
+│   └── assets/pets/        # Installed pet packs
 └── data/
     ├── history.db           # Command history (auto-created)
     └── logs/                # Log files
@@ -156,39 +156,35 @@ python main.py --api
 
 Show an animated desktop pet on screen while the browser-based STT runs
 in the background. The pet reacts to your commands in real time —
-listening → thinking → working → happy/error — with speech bubbles:
+listening → thinking → working → happy/error — with speech bubbles, and
+wanders along the bottom of your screen when idle (using its built-in
+run animations):
 
 ```bash
 # Start with the default pet
 python main.py --pet
 
 # Start with a specific pet pack
-python main.py --pet cat
-python main.py --pet hu-tao
-
-# List installed pet packs
-python main.py --list-pets
-
-# Download community pets from awesome-codex-pet (GitHub)
-python main.py --fetch-pets
-# ...or a single pack
-python main.py --fetch-pets hu-tao
+python main.py --pet aiko
+python main.py --pet doraemon
 ```
 
 Then open `http://127.0.0.1:8000` in Chrome/Edge and speak — "Hey Nova,
 open Chrome" — the pet listens, thinks and celebrates right on your desktop.
 
-**Pets from GitHub, automatically available:**
-`python main.py --fetch-pets` downloads the whole
-[awesome-codex-pet](https://github.com/legeling/awesome-codex-pet)
-`pets/` collection into `pet/assets/pets/`. No code changes needed —
-the engine discovers packs on every launch. You can also point the engine
-at your own clone or any folder full of packs:
+**Installed pets** (drop any Codex-compatible pack folder with
+`pet.json` + `spritesheet.webp` into `pet/assets/pets/` to add more):
 
-```bash
-export PET_PACKS_DIR=/path/to/awesome-codex-pet/pets
-python main.py --pet
-```
+| Pet | Pack id |
+|-----|---------|
+| Aiko | `aiko` |
+| Becky | `becky` |
+| Doraemon | `doraemon` |
+| Little Black Mage | `little-mage` |
+| Nova Bot | `robot--nova` |
+| Nova Cat | `cat--nova` |
+| Nova Fox | `fox--nova` |
+| Nova Panda | `panda--nova` |
 
 ---
 

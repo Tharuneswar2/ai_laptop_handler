@@ -32,15 +32,6 @@ class PetConfig:
     pets_dir: str = "pets"
     """Name of the pet packs folder inside ``asset_root``."""
 
-    packs_root: Path | None = None
-    """Optional directory that directly contains pet pack folders.
-
-    When set, it overrides ``asset_root / pets_dir`` — useful for pointing
-    the engine at an external collection such as a clone of the
-    awesome-codex-pet repository (``pets/`` folder) or the ``PET_PACKS_DIR``
-    environment variable.
-    """
-
     # ─── Rendering ─────────────────────────────────────────────────────
     pet_size: tuple[int, int] = (192, 208)
     """Base frame size of the pet in logical pixels (Codex v1 frame)."""
@@ -82,6 +73,28 @@ class PetConfig:
     state_timeout: float = 90.0
     """Seconds a non-IDLE state may persist before it is force-released."""
 
+    # ─── Movement (wandering) ──────────────────────────────────────────
+    movement_enabled: bool = True
+    """Let the pet wander along the bottom of the screen when idle."""
+
+    walk_interval_ms: int = 40
+    """Milliseconds between movement steps (higher = slower walk)."""
+
+    walk_step_px: int = 2
+    """Pixels moved per step while walking."""
+
+    min_walk_pause: float = 20.0
+    """Minimum seconds of idle before the pet may start walking."""
+
+    max_walk_pause: float = 60.0
+    """Maximum seconds of idle before the pet starts walking."""
+
+    min_walk_distance: int = 150
+    """Minimum walk length in pixels."""
+
+    max_walk_distance: int = 500
+    """Maximum walk length in pixels."""
+
     # ─── Position persistence ──────────────────────────────────────────
     default_position: tuple[int, int] | None = None
     """Starting window position; ``None`` = bottom-right of the primary screen."""
@@ -95,17 +108,9 @@ class PetConfig:
 
     # ─── Convenience helpers ───────────────────────────────────────────
 
-    def __post_init__(self) -> None:
-        """Apply the ``PET_PACKS_DIR`` env override (external pet collection)."""
-        env = os.environ.get("PET_PACKS_DIR", "")
-        if env and self.packs_root is None:
-            self.packs_root = Path(env)
-
     @property
     def pets_root(self) -> Path:
         """Absolute path to the folder containing pet packs."""
-        if self.packs_root is not None:
-            return self.packs_root
         return self.asset_root / self.pets_dir
 
     def with_defaults(self, **overrides: Any) -> "PetConfig":
@@ -155,7 +160,7 @@ def load_config(path: str | os.PathLike | None = None) -> PetConfig:
     for key, value in raw.items():
         if not hasattr(config, key):
             continue
-        if key in ("asset_root", "position_path", "packs_root"):
+        if key in ("asset_root", "position_path"):
             value = Path(str(value))
         elif key in ("pet_size", "default_position") and isinstance(value, list):
             value = tuple(value)
