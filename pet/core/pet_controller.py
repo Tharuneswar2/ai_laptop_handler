@@ -88,7 +88,11 @@ class PetController(QObject):
         set_thread_hook(self._marshal)
 
         # Engine pieces.
-        self.loader = AssetLoader(self.config.asset_root, self.config.pets_dir)
+        self.loader = AssetLoader(
+            self.config.asset_root,
+            self.config.pets_dir,
+            packs_root=self.config.packs_root,
+        )
         self.emotions = EmotionManager()
         self.state_machine = PetStateMachine(
             StateMachineOptions(state_timeout=self.config.state_timeout)

@@ -11,6 +11,9 @@ Modes:
   python main.py --web        # Web UI mode (browser STT via WebSocket)
   python main.py --api        # Start API server only (REST endpoints)
   python main.py --no-wake    # Voice mode, skip wake word
+  python main.py --pet        # Desktop pet + web STT in the background
+  python main.py --list-pets  # List installed pet packs
+  python main.py --fetch-pets # Download community pet packs from GitHub
 """
 
 import argparse
@@ -243,11 +246,76 @@ def main():
     parser.add_argument("--web", action="store_true", help="Run web UI with browser-based STT (recommended)")
     parser.add_argument("--no-wake", action="store_true", help="Skip wake word detection (voice mode only)")
     parser.add_argument("--api", action="store_true", help="Start API server only (REST endpoints)")
+    parser.add_argument(
+        "--pet",
+        nargs="?",
+        const="__default__",
+        metavar="PET",
+        help="Run the desktop pet with web STT in the background (optionally: pet pack id/slug)",
+    )
+    parser.add_argument("--list-pets", action="store_true", help="List installed pet packs and exit")
+    parser.add_argument(
+        "--fetch-pets",
+        nargs="?",
+        const="all",
+        metavar="SLUG",
+        action="store",
+        help="Download community pet packs from awesome-codex-pet (optionally a single pack name)",
+    )
     args = parser.parse_args()
 
     setup_logging()
     logger.info("Starting AI Laptop Handler (Nova)...")
     logger.info("STT Provider: %s", config.STT_PROVIDER)
+
+    # ─── Pet asset management ──────────────────────────────────────────
+    if args.list_pets:
+        from pet.config import PetConfig
+        from pet.core.asset_loader import AssetLoader
+
+        pet_config = PetConfig()
+        packs = AssetLoader(
+            pet_config.asset_root, pet_config.pets_dir, packs_root=pet_config.packs_root
+        ).list_pets()
+        print_banner()
+        if not packs:
+            console.print("  [yellow]No pet packs installed.[/]")
+            console.print("  Run [bold]python main.py --fetch-pets[/] to download community pets.")
+        else:
+            console.print(f"  [bold green]Installed pet packs ({len(packs)}):[/]")
+            for entry in packs:
+                console.print(f"    [cyan]{entry['id']}[/]  [dim]{entry['dir']}[/]")
+        return
+
+    if args.fetch_pets:
+        from pet.tools.fetch_pets import fetch_pets
+
+        slugs = [args.fetch_pets] if args.fetch_pets != "all" else None
+        print_banner()
+        console.print("  [bold green]🐾 Fetching community pets (awesome-codex-pet)...[/]")
+        stats = fetch_pets(slugs=slugs)
+        console.print()
+        console.print(f"  [bold]Installed:[/] {len(stats['installed'])}  "
+                      f"[bold]Skipped:[/] {len(stats['skipped'])}  "
+                      f"[bold]Invalid:[/] {len(stats['invalid'])}")
+        for name in stats["installed"]:
+            console.print(f"    [green]+[/] {name}")
+        if stats["invalid"]:
+            console.print("  [yellow]Invalid packs skipped:[/] " + ", ".join(stats["invalid"]))
+        return
+
+    # ─── Desktop pet + web STT mode ────────────────────────────────────
+    if args.pet:
+        from pet.integration import run_pet_mode
+
+        slug = None if args.pet == "__default__" else args.pet
+        print_banner()
+        console.print("  [bold green]🐾 Pet Mode — Desktop pet + web STT[/]")
+        console.print()
+        console.print(f"  [bold white]Open your browser:[/] [cyan]http://{config.API_HOST}:{config.API_PORT}[/]")
+        console.print("  [dim]Talk to the pet via browser speech recognition.[/]")
+        print_divider()
+        return run_pet_mode(slug)
 
     if args.web:
         run_web_mode()

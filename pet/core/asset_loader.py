@@ -132,9 +132,15 @@ class AssetLoader:
     slices its spritesheet into per-animation frames ready for playback.
     """
 
-    def __init__(self, asset_root: Path | str, pets_dir: str = "pets") -> None:
+    def __init__(
+        self,
+        asset_root: Path | str,
+        pets_dir: str = "pets",
+        packs_root: Path | str | None = None,
+    ) -> None:
         self.asset_root = Path(asset_root)
-        self.pets_root = self.asset_root / pets_dir
+        self.packs_root = Path(packs_root) if packs_root is not None else None
+        self.pets_root = self.packs_root if self.packs_root is not None else self.asset_root / pets_dir
 
     # ─── Discovery ─────────────────────────────────────────────────────
 

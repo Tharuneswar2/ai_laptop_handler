@@ -13,6 +13,7 @@ Endpoints:
 import json
 import logging
 import time
+from typing import Any, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
@@ -32,6 +33,35 @@ app = FastAPI(
     description="Voice-controlled laptop assistant — API + WebSocket interface",
     version="2.0.0",
 )
+
+# ─── Command Observers ────────────────────────────────────────────────
+# External components (e.g. the desktop pet) can subscribe to assistant
+# events without the server knowing about them.  Observers are called with
+# plain dicts from the uvicorn thread, so they must be thread-safe.
+
+_observers: list[Callable[[dict[str, Any]], None]] = []
+
+
+def add_command_observer(observer: Callable[[dict[str, Any]], None]) -> None:
+    """
+    Register a callback receiving assistant pipeline events.
+
+    Event dicts (``type`` key):
+      ``transcript``    — a final transcript arrived  {"text": ...}
+      ``wake_detected`` — the wake word was heard
+      ``processing``    — a command is being routed      {"text": ...}
+      ``result``        — a command finished             {"success", "message", "tool", "action", "duration_ms"}
+      ``error``         — something failed               {"message": ...}
+    """
+    _observers.append(observer)
+
+
+def _emit(event: dict[str, Any]) -> None:
+    for observer in _observers:
+        try:
+            observer(event)
+        except Exception:
+            logger.exception("Command observer failed: %s", event.get("type"))
 
 # ─── Static Files ─────────────────────────────────────────────────────
 
@@ -96,6 +126,7 @@ def run_command(request: CommandRequest):
     if clean_text:
         text = clean_text
 
+    _emit({"type": "processing", "text": text})
     intent = parse_intent(text)
     result = route(intent)
     duration_ms = int((time.time() - start) * 1000)
@@ -112,6 +143,15 @@ def run_command(request: CommandRequest):
         )
     except Exception as e:
         logger.error("Failed to log to memory: %s", e)
+
+    _emit({
+        "type": "result",
+        "success": result.success,
+        "message": result.message,
+        "tool": intent.tool,
+        "action": intent.action,
+        "duration_ms": duration_ms,
+    })
 
     return CommandResponse(
         success=result.success,
@@ -182,12 +222,15 @@ async def websocket_endpoint(ws: WebSocket):
             text = text[:config.WS_MAX_TEXT_LENGTH]
             logger.info("WS received: '%s' (wake_active=%s)", text[:80], wake_active)
 
+            _emit({"type": "transcript", "text": text})
+
             # Check for wake word
             has_wake, remaining = check_text_for_wake_word(text)
 
             if has_wake:
                 wake_active = True
                 logger.info("Wake word detected in: '%s'", text)
+                _emit({"type": "wake_detected"})
                 await ws.send_json({"type": "wake_detected"})
 
                 # If there's a command after the wake word, process it immediately
@@ -212,6 +255,7 @@ async def websocket_endpoint(ws: WebSocket):
             # ─── Process command ──────────────────────────────────
             start = time.time()
 
+            _emit({"type": "processing", "text": text})
             intent = parse_intent(text)
             result = route(intent)
             duration_ms = int((time.time() - start) * 1000)
@@ -224,6 +268,15 @@ async def websocket_endpoint(ws: WebSocket):
                 status="ok" if result.success else "error",
                 duration_ms=duration_ms,
             )
+
+            _emit({
+                "type": "result",
+                "success": result.success,
+                "message": result.message,
+                "tool": intent.tool,
+                "action": intent.action,
+                "duration_ms": duration_ms,
+            })
 
             # Send result back to browser
             await ws.send_json({
@@ -250,6 +303,7 @@ async def websocket_endpoint(ws: WebSocket):
         logger.info("WebSocket client disconnected.")
     except Exception as e:
         logger.error("WebSocket error: %s", e, exc_info=True)
+        _emit({"type": "error", "message": str(e)})
         try:
             await ws.send_json({"type": "error", "message": str(e)})
         except Exception:
