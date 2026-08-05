@@ -55,7 +55,7 @@ def setup_logging() -> None:
         ],
     )
     # Suppress noisy libraries
-    logging.getLogger("nemo_logger").setLevel(logging.WARNING)
+    logging.getLogger("faster_whisper").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 

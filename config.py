@@ -42,16 +42,18 @@ DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
 # ─── Wake Word ────────────────────────────────────────────────────────
-WAKE_WORDS = ["hey nova", "hey assistant","hello"]
+WAKE_WORDS = ["hey nova", "hey assistant"]
 WAKE_LISTEN_DURATION = 2        # seconds per wake-word check window
 WAKE_WORD_ENABLED = True        # set False to skip wake word entirely
 
 # ─── Voice Settings ───────────────────────────────────────────────────
-ASR_MODEL = "nemo-parakeet-tdt-0.6b-v2"  # NVIDIA Parakeet TDT via onnx-asr
+WHISPER_MODEL = "large-v3"          # tiny | base | small  (tiny ≈ 75 MB)
+WHISPER_DEVICE = "cpu"          # cpu | cuda
+WHISPER_COMPUTE_TYPE = "int8"   # int8 for CPU, float16 for GPU
 LISTEN_DURATION = 5             # default recording length (seconds)
 LISTEN_MAX_DURATION = 15        # max recording for silence-based stop
 SILENCE_THRESHOLD = 500         # amplitude threshold for silence
-SAMPLE_RATE = 16000             # Parakeet expects 16 kHz
+SAMPLE_RATE = 16000             # Whisper expects 16 kHz
 
 # ─── TTS Settings ─────────────────────────────────────────────────────
 TTS_ENGINE = "pyttsx3"          # pyttsx3 | piper (future)
