@@ -1,18 +1,7 @@
 # ─── AI Laptop Voice Handler ─── Dependencies ───
 # Install: pip install -r requirements.txt
 
-# Voice — Speech-to-Text
-faster-whisper>=1.0.0
-nvidia-cublas-cu12>=12.0.0
-nvidia-cudnn-cu12>=9.0.0
-nvidia-cuda-nvrtc-cu12>=12.0.0
-torch
-
-# Voice — Audio recording
-sounddevice>=0.4.6
-scipy>=1.11.0
-
-# Voice — Text-to-Speech
+# Voice — Text-to-Speech (offline, backend fallback)
 pyttsx3>=2.90
 
 # System monitoring
@@ -21,9 +10,24 @@ psutil>=5.9.0
 # Terminal UI
 rich>=13.0.0
 
-# API server
+# API server + WebSocket
 fastapi>=0.100.0
-uvicorn>=0.23.0
+uvicorn[standard]>=0.23.0
+websockets>=12.0
 
 # Environment variables
 python-dotenv>=1.0.0
+
+# ─── Optional: Local Whisper STT (only if STT_PROVIDER=whisper_local) ───
+# Uncomment below if you want local speech-to-text instead of browser STT.
+# Requires ~75 MB model download + CUDA or CPU-only mode.
+#
+# faster-whisper>=1.0.0
+# sounddevice>=0.4.6
+# scipy>=1.11.0
+#
+# For CUDA/GPU acceleration (optional):
+# nvidia-cublas-cu12>=12.0.0
+# nvidia-cudnn-cu12>=9.0.0
+# nvidia-cuda-nvrtc-cu12>=12.0.0
+# torch

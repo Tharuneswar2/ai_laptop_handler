@@ -6,16 +6,18 @@ Coordinates the full pipeline:
   listen → transcribe → understand → route → execute → speak
 
 Modes:
-  python main.py              # Full voice mode (mic + speaker)
+  python main.py              # Full voice mode (mic + speaker, needs whisper_local)
   python main.py --text       # Text-only mode (keyboard input)
+  python main.py --web        # Web UI mode (browser STT via WebSocket)
+  python main.py --api        # Start API server only (REST endpoints)
   python main.py --no-wake    # Voice mode, skip wake word
-  python main.py --api        # Start API server instead
 """
 
 import argparse
 import logging
 import sys
 import time
+import signal
 from pathlib import Path
 
 # Ensure project root is in the Python path
@@ -31,14 +33,14 @@ from ui.terminal_ui import (
     print_help, display_interaction, prompt_text_input,
 )
 
-import signal
-import sys
 
 def shutdown(sig, frame):
     print("\nStopping...")
     sys.exit(0)
 
 signal.signal(signal.SIGINT, shutdown)
+
+
 # ─── Logging Setup ───────────────────────────────────────────────────
 
 def setup_logging() -> None:
@@ -58,6 +60,7 @@ def setup_logging() -> None:
     logging.getLogger("faster_whisper").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
 logger = logging.getLogger(__name__)
@@ -154,10 +157,10 @@ def run_text_mode(memory: Memory) -> None:
             break
 
 
-# ─── Voice Mode Loop ─────────────────────────────────────────────────
+# ─── Voice Mode Loop (whisper_local) ─────────────────────────────────
 
 def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
-    """Run the assistant in full voice mode (mic + speaker)."""
+    """Run the assistant in full voice mode (local mic + speaker)."""
     print_banner()
     print_help()
 
@@ -175,14 +178,12 @@ def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
     while True:
         try:
             if use_wake_word:
-                # Wait for wake word
                 print_status("Waiting for wake word...", "bold cyan")
                 if not detect_wake_word(timeout=None):
                     continue
                 speak("Yes?")
                 print_status("Wake word detected! Listening...", "bold green")
 
-            # Listen for command
             print_status("Listening...", "bold green")
             text = listen_smart()
 
@@ -190,7 +191,6 @@ def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
                 print_status("Didn't catch that. Try again.", "dim yellow")
                 continue
 
-            # Strip wake word if it's in the transcription
             _, clean_text = check_text_for_wake_word(text)
             if clean_text:
                 text = clean_text
@@ -209,6 +209,29 @@ def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
             time.sleep(1)
 
 
+# ─── Web Mode ────────────────────────────────────────────────────────
+
+def run_web_mode() -> None:
+    """
+    Start the web UI with browser-based STT.
+
+    Opens the FastAPI server which serves the web interface at /
+    and accepts WebSocket connections at /ws for real-time voice input.
+    """
+    print_banner()
+    console.print("  [bold green]🌐 Web Mode — Browser-based Speech Recognition[/]")
+    console.print()
+    console.print(f"  [bold white]Open your browser:[/] [cyan]http://{config.API_HOST}:{config.API_PORT}[/]")
+    console.print(f"  [bold white]API docs:[/]          [cyan]http://{config.API_HOST}:{config.API_PORT}/docs[/]")
+    console.print()
+    console.print("  [dim]Use Chrome or Edge for best Speech Recognition support.[/]")
+    console.print("  [dim]Press Ctrl+C to stop the server.[/]")
+    print_divider()
+
+    from api.server import start_server
+    start_server()
+
+
 # ─── Entry Point ─────────────────────────────────────────────────────
 
 def main():
@@ -217,12 +240,18 @@ def main():
         description="AI Laptop Voice Handler (Nova) — voice-controlled laptop assistant",
     )
     parser.add_argument("--text", action="store_true", help="Run in text-only mode (no microphone)")
-    parser.add_argument("--no-wake", action="store_true", help="Skip wake word detection")
-    parser.add_argument("--api", action="store_true", help="Start API server instead")
+    parser.add_argument("--web", action="store_true", help="Run web UI with browser-based STT (recommended)")
+    parser.add_argument("--no-wake", action="store_true", help="Skip wake word detection (voice mode only)")
+    parser.add_argument("--api", action="store_true", help="Start API server only (REST endpoints)")
     args = parser.parse_args()
 
     setup_logging()
     logger.info("Starting AI Laptop Handler (Nova)...")
+    logger.info("STT Provider: %s", config.STT_PROVIDER)
+
+    if args.web:
+        run_web_mode()
+        return
 
     if args.api:
         from api.server import start_server

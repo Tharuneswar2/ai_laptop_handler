@@ -11,44 +11,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── Load NVIDIA CUDA DLLs on Windows ────────────────────────────────
-if os.name == "nt":
-    import sys
-    # Search python environment site-packages for nvidia CUDA DLLs
-    for path in sys.path:
-        if not path:
-            continue
-        p_path = Path(path)
-        if p_path.name == "site-packages":
-            nvidia_dir = p_path / "nvidia"
-            if nvidia_dir.exists():
-                for bin_dir in nvidia_dir.glob("**/bin"):
-                    if bin_dir.is_dir():
-                        try:
-                            os.add_dll_directory(str(bin_dir))
-                            # Also append to PATH for subprocesses/external calls
-                            os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
-                        except Exception:
-                            pass
-
 # ─── Paths ────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
 LOG_DIR = DATA_DIR / "logs"
 HISTORY_DB = DATA_DIR / "history.db"
+WEB_UI_DIR = PROJECT_ROOT / "ui" / "web"
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
+
+# ─── STT Provider ─────────────────────────────────────────────────────
+# "browser"        — Web Speech API via browser (default, no GPU needed)
+# "whisper_local"  — faster-whisper running locally (needs CUDA or CPU)
+# "cloud_whisper"  — future: cloud-based Whisper API
+STT_PROVIDER = os.getenv("STT_PROVIDER", "browser")
+STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en-US")  # BCP-47 language tag
 
 # ─── Wake Word ────────────────────────────────────────────────────────
 WAKE_WORDS = ["hey nova", "hey assistant"]
 WAKE_LISTEN_DURATION = 2        # seconds per wake-word check window
 WAKE_WORD_ENABLED = True        # set False to skip wake word entirely
 
-# ─── Voice Settings ───────────────────────────────────────────────────
-WHISPER_MODEL = "large-v3"          # tiny | base | small  (tiny ≈ 75 MB)
-WHISPER_DEVICE = "cpu"          # cpu | cuda
+# ─── Voice Settings (whisper_local mode only) ─────────────────────────
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE_TYPE = "int8"   # int8 for CPU, float16 for GPU
 LISTEN_DURATION = 5             # default recording length (seconds)
 LISTEN_MAX_DURATION = 15        # max recording for silence-based stop
@@ -61,7 +49,7 @@ TTS_RATE = 175                  # words per minute
 TTS_VOLUME = 0.9                # 0.0 to 1.0
 
 # ─── AI Brain ─────────────────────────────────────────────────────────
-LLM_PROVIDER = "ollama"     # rule_based | ollama | gemini
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "rule_based")
 OLLAMA_MODEL = "phi3:mini"      # small model for Ollama
 OLLAMA_URL = "http://localhost:11434"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -122,5 +110,8 @@ LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 # ─── API Server ───────────────────────────────────────────────────────
-API_HOST = "127.0.0.1"
-API_PORT = 8000
+API_HOST = os.getenv("API_HOST", "127.0.0.1")
+API_PORT = int(os.getenv("API_PORT", "8000"))
+
+# ─── WebSocket ────────────────────────────────────────────────────────
+WS_MAX_TEXT_LENGTH = 500        # max characters per WebSocket message

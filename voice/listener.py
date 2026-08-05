@@ -1,24 +1,62 @@
 """
-voice/listener.py — Microphone input and speech-to-text using faster-whisper.
+voice/listener.py — Speech-to-text abstraction layer.
 
-Records audio from the microphone, transcribes it using Whisper Tiny,
-and returns clean text. Handles silence detection and errors gracefully.
+Supports multiple STT providers:
+  - "browser":        Web Speech API (handled entirely in the browser)
+  - "whisper_local":  faster-whisper running locally (needs pip install)
+
+When STT_PROVIDER is "browser", the mic/transcription is handled by
+the browser's Web Speech API and sent to the backend via WebSocket.
+This module is only used directly in "whisper_local" mode.
 """
 
 import logging
-import tempfile
-from pathlib import Path
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-def _get_model():
-    """Lazily load the Whisper model (downloads ~75 MB on first run)."""
-    from faster_whisper import WhisperModel
+def get_stt_provider() -> str:
+    """Return the configured STT provider name."""
     import config
+    return config.STT_PROVIDER
 
+
+def is_browser_stt() -> bool:
+    """Check if the current STT provider is browser-based."""
+    return get_stt_provider() == "browser"
+
+
+# ─── Browser STT (no-op — handled in browser) ────────────────────────
+
+def listen_browser() -> str:
+    """
+    Placeholder for browser STT mode.
+
+    In browser mode, speech recognition is handled entirely by the
+    browser's Web Speech API. This function is never called directly;
+    text arrives via WebSocket to the API server.
+    """
+    logger.info("Browser STT mode — transcription is handled by the browser.")
+    return ""
+
+
+# ─── Whisper Local STT (optional) ────────────────────────────────────
+
+_model = None
+
+
+def _get_whisper_model():
+    """Lazily load the Whisper model (downloads on first run)."""
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError:
+        raise ImportError(
+            "faster-whisper is not installed. To use local Whisper STT, run:\n"
+            "  pip install faster-whisper sounddevice scipy\n"
+            "Then set STT_PROVIDER=whisper_local in your .env file."
+        )
+
+    import config
     logger.info("Loading Whisper '%s' model (device=%s)...", config.WHISPER_MODEL, config.WHISPER_DEVICE)
     model = WhisperModel(
         config.WHISPER_MODEL,
@@ -29,29 +67,17 @@ def _get_model():
     return model
 
 
-# Singleton — loaded once, reused across calls
-_model = None
-
-
 def get_model():
     """Return the singleton Whisper model instance."""
     global _model
     if _model is None:
-        _model = _get_model()
+        _model = _get_whisper_model()
     return _model
 
 
-def record_audio(duration: float = 5.0, sample_rate: int = 16000) -> np.ndarray:
-    """
-    Record audio from the default microphone.
-
-    Args:
-        duration: Recording length in seconds.
-        sample_rate: Sample rate in Hz (Whisper expects 16000).
-
-    Returns:
-        NumPy array of audio samples (mono, float32).
-    """
+def record_audio(duration: float = 5.0, sample_rate: int = 16000):
+    """Record audio from the default microphone."""
+    import numpy as np
     import sounddevice as sd
 
     logger.info("Recording for %.1f seconds...", duration)
@@ -62,7 +88,7 @@ def record_audio(duration: float = 5.0, sample_rate: int = 16000) -> np.ndarray:
             channels=1,
             dtype="float32",
         )
-        sd.wait()  # block until recording is done
+        sd.wait()
         logger.info("Recording complete.")
         return audio.flatten()
     except Exception as e:
@@ -76,20 +102,9 @@ def record_until_silence(
     silence_duration: float = 1.5,
     sample_rate: int = 16000,
     chunk_size: float = 0.5,
-) -> np.ndarray:
-    """
-    Record audio until silence is detected or max duration is reached.
-
-    Args:
-        max_duration: Maximum recording time in seconds.
-        silence_threshold: RMS amplitude below which audio is 'silence'.
-        silence_duration: Seconds of continuous silence before stopping.
-        sample_rate: Sample rate in Hz.
-        chunk_size: Size of each recording chunk in seconds.
-
-    Returns:
-        NumPy array of recorded audio.
-    """
+):
+    """Record audio until silence is detected or max duration is reached."""
+    import numpy as np
     import sounddevice as sd
 
     logger.info("Recording (auto-stop on silence, max %.1fs)...", max_duration)
@@ -109,8 +124,7 @@ def record_until_silence(
             chunk = chunk.flatten()
             chunks.append(chunk)
 
-            # Check if this chunk is silent
-            rms = np.sqrt(np.mean(chunk ** 2)) * 32768  # scale to int16 range
+            rms = np.sqrt(np.mean(chunk ** 2)) * 32768
             if rms < silence_threshold:
                 silent_chunks += 1
             else:
@@ -123,28 +137,20 @@ def record_until_silence(
         if chunks:
             return np.concatenate(chunks)
         return np.array([], dtype="float32")
-
     except Exception as e:
         logger.error("Recording with silence detection failed: %s", e)
         return np.array([], dtype="float32")
 
 
-def transcribe(audio: np.ndarray) -> str:
-    """
-    Transcribe audio to text using faster-whisper.
+def transcribe(audio) -> str:
+    """Transcribe audio to text using faster-whisper."""
+    import numpy as np
 
-    Args:
-        audio: NumPy array of audio samples (mono, float32, 16kHz).
-
-    Returns:
-        Transcribed text string, or empty string on failure.
-    """
-    if audio.size == 0:
+    if not isinstance(audio, np.ndarray) or audio.size == 0:
         logger.warning("Empty audio, nothing to transcribe.")
         return ""
 
     model = get_model()
-
     try:
         segments, info = model.transcribe(audio, beam_size=1, language="en")
         text = " ".join(segment.text.strip() for segment in segments).strip()
@@ -157,19 +163,18 @@ def transcribe(audio: np.ndarray) -> str:
 
 def listen(duration: float = None) -> str:
     """
-    One-shot: record from microphone and transcribe to text.
+    Record from microphone and transcribe to text.
 
-    Args:
-        duration: Recording duration in seconds. Uses config default if None.
-
-    Returns:
-        Transcribed text string.
+    In browser mode, returns empty (transcription handled by browser).
+    In whisper_local mode, records and transcribes locally.
     """
     import config
 
+    if is_browser_stt():
+        return listen_browser()
+
     if duration is None:
         duration = config.LISTEN_DURATION
-
     audio = record_audio(duration=duration, sample_rate=config.SAMPLE_RATE)
     return transcribe(audio)
 
@@ -178,10 +183,12 @@ def listen_smart() -> str:
     """
     Record with automatic silence detection and transcribe.
 
-    Returns:
-        Transcribed text string.
+    In browser mode, returns empty (transcription handled by browser).
     """
     import config
+
+    if is_browser_stt():
+        return listen_browser()
 
     audio = record_until_silence(
         max_duration=config.LISTEN_MAX_DURATION,

@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Nova — AI Laptop Voice Handler. Control your laptop with voice commands.">
+    <title>Nova — AI Voice Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-brand">
+                <span class="header-icon">🎤</span>
+                <h1 class="header-title">Nova</h1>
+                <span class="header-badge">AI Assistant</span>
+            </div>
+            <div class="header-status">
+                <span class="connection-dot" id="connectionDot"></span>
+                <span class="connection-text" id="connectionText">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Status Card -->
+            <section class="status-card" id="statusCard">
+                <div class="status-indicator" id="statusIndicator">
+                    <div class="status-ring" id="statusRing"></div>
+                    <div class="status-label" id="statusLabel">Ready</div>
+                </div>
+                <p class="status-hint" id="statusHint">Click the microphone to start listening</p>
+            </section>
+
+            <!-- Mic Button -->
+            <section class="mic-section">
+                <button class="mic-button" id="micButton" aria-label="Toggle microphone">
+                    <div class="mic-pulse" id="micPulse"></div>
+                    <svg class="mic-icon" id="micIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                        <line x1="12" y1="19" x2="12" y2="23"/>
+                        <line x1="8" y1="23" x2="16" y2="23"/>
+                    </svg>
+                </button>
+                <p class="mic-label" id="micLabel">Tap to listen</p>
+            </section>
+
+            <!-- Live Transcription -->
+            <section class="transcript-card" id="transcriptCard">
+                <div class="transcript-header">
+                    <span class="transcript-title">Live Transcription</span>
+                    <span class="transcript-lang" id="transcriptLang">en-US</span>
+                </div>
+                <div class="transcript-body">
+                    <p class="transcript-interim" id="interimText"></p>
+                    <p class="transcript-final" id="finalText">Waiting for speech...</p>
+                </div>
+            </section>
+
+            <!-- Result Panel -->
+            <section class="result-card hidden" id="resultCard">
+                <div class="result-header">
+                    <span class="result-icon" id="resultIcon">✅</span>
+                    <span class="result-title" id="resultTitle">Result</span>
+                </div>
+                <div class="result-body">
+                    <div class="result-meta">
+                        <span class="result-tag" id="resultTool">—</span>
+                        <span class="result-tag" id="resultAction">—</span>
+                        <span class="result-duration" id="resultDuration"></span>
+                    </div>
+                    <p class="result-message" id="resultMessage"></p>
+                </div>
+            </section>
+
+            <!-- History -->
+            <section class="history-card" id="historyCard">
+                <div class="history-header">
+                    <span class="history-title">Command History</span>
+                    <button class="history-clear" id="clearHistory" aria-label="Clear history">Clear</button>
+                </div>
+                <div class="history-list" id="historyList">
+                    <p class="history-empty">No commands yet. Say "Hey Nova" to start!</p>
+                </div>
+            </section>
+        </main>
+
+        <!-- Error Banner -->
+        <div class="error-banner hidden" id="errorBanner">
+            <span class="error-icon">⚠️</span>
+            <span class="error-text" id="errorText"></span>
+            <button class="error-close" id="errorClose" aria-label="Close error">✕</button>
+        </div>
+
+        <!-- Example Commands Footer -->
+        <footer class="footer">
+            <p class="footer-title">Example commands:</p>
+            <div class="footer-examples">
+                <span class="example-chip">"Hey Nova, open Chrome"</span>
+                <span class="example-chip">"Hey Nova, check battery"</span>
+                <span class="example-chip">"Hey Nova, search Python on YouTube"</span>
+                <span class="example-chip">"Hey Nova, create a folder called projects"</span>
+                <span class="example-chip">"Hey Nova, take a screenshot"</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
