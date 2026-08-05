@@ -11,6 +11,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ─── Load NVIDIA CUDA DLLs on Windows ────────────────────────────────
+if os.name == "nt":
+    import sys
+    # Search python environment site-packages for nvidia CUDA DLLs
+    for path in sys.path:
+        if not path:
+            continue
+        p_path = Path(path)
+        if p_path.name == "site-packages":
+            nvidia_dir = p_path / "nvidia"
+            if nvidia_dir.exists():
+                for bin_dir in nvidia_dir.glob("**/bin"):
+                    if bin_dir.is_dir():
+                        try:
+                            os.add_dll_directory(str(bin_dir))
+                            # Also append to PATH for subprocesses/external calls
+                            os.environ["PATH"] = str(bin_dir) + os.pathsep + os.environ.get("PATH", "")
+                        except Exception:
+                            pass
+
 # ─── Paths ────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -22,18 +42,16 @@ DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
 
 # ─── Wake Word ────────────────────────────────────────────────────────
-WAKE_WORDS = ["hey nova", "hey assistant"]
+WAKE_WORDS = ["hey nova", "hey assistant","hello"]
 WAKE_LISTEN_DURATION = 2        # seconds per wake-word check window
 WAKE_WORD_ENABLED = True        # set False to skip wake word entirely
 
 # ─── Voice Settings ───────────────────────────────────────────────────
-WHISPER_MODEL = "tiny"          # tiny | base | small  (tiny ≈ 75 MB)
-WHISPER_DEVICE = "cpu"          # cpu | cuda
-WHISPER_COMPUTE_TYPE = "int8"   # int8 for CPU, float16 for GPU
+ASR_MODEL = "nemo-parakeet-tdt-0.6b-v2"  # NVIDIA Parakeet TDT via onnx-asr
 LISTEN_DURATION = 5             # default recording length (seconds)
 LISTEN_MAX_DURATION = 15        # max recording for silence-based stop
 SILENCE_THRESHOLD = 500         # amplitude threshold for silence
-SAMPLE_RATE = 16000             # Whisper expects 16 kHz
+SAMPLE_RATE = 16000             # Parakeet expects 16 kHz
 
 # ─── TTS Settings ─────────────────────────────────────────────────────
 TTS_ENGINE = "pyttsx3"          # pyttsx3 | piper (future)
@@ -41,7 +59,7 @@ TTS_RATE = 175                  # words per minute
 TTS_VOLUME = 0.9                # 0.0 to 1.0
 
 # ─── AI Brain ─────────────────────────────────────────────────────────
-LLM_PROVIDER = "rule_based"     # rule_based | ollama | gemini
+LLM_PROVIDER = "ollama"     # rule_based | ollama | gemini
 OLLAMA_MODEL = "phi3:mini"      # small model for Ollama
 OLLAMA_URL = "http://localhost:11434"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

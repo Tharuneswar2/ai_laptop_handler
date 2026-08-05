@@ -1,8 +1,9 @@
 """
-voice/listener.py — Microphone input and speech-to-text using faster-whisper.
+voice/listener.py — Microphone input and speech-to-text using NVIDIA Parakeet.
 
-Records audio from the microphone, transcribes it using Whisper Tiny,
-and returns clean text. Handles silence detection and errors gracefully.
+Records audio from the microphone, transcribes it using Parakeet TDT 0.6B
+(via onnx-asr), and returns clean text. Handles silence detection and
+errors gracefully.
 """
 
 import logging
@@ -15,17 +16,22 @@ logger = logging.getLogger(__name__)
 
 
 def _get_model():
-    """Lazily load the Whisper model (downloads ~75 MB on first run)."""
-    from faster_whisper import WhisperModel
+    """Lazily load the Parakeet ASR model (downloads ~600 MB on first run)."""
+    import onnx_asr
+    import onnxruntime as ort
     import config
 
-    logger.info("Loading Whisper '%s' model (device=%s)...", config.WHISPER_MODEL, config.WHISPER_DEVICE)
-    model = WhisperModel(
-        config.WHISPER_MODEL,
-        device=config.WHISPER_DEVICE,
-        compute_type=config.WHISPER_COMPUTE_TYPE,
+    logger.info("Loading Parakeet model '%s'...", config.ASR_MODEL)
+
+    opts = ort.SessionOptions()
+    opts.log_severity_level = 3  # Suppress ONNX runtime warnings/errors
+
+    model = onnx_asr.load_model(
+        config.ASR_MODEL,
+        providers=["CPUExecutionProvider"],
+        sess_options=opts,
     )
-    logger.info("Whisper model loaded successfully.")
+    logger.info("Parakeet model loaded successfully.")
     return model
 
 
@@ -34,7 +40,7 @@ _model = None
 
 
 def get_model():
-    """Return the singleton Whisper model instance."""
+    """Return the singleton Parakeet model instance."""
     global _model
     if _model is None:
         _model = _get_model()
@@ -47,7 +53,7 @@ def record_audio(duration: float = 5.0, sample_rate: int = 16000) -> np.ndarray:
 
     Args:
         duration: Recording length in seconds.
-        sample_rate: Sample rate in Hz (Whisper expects 16000).
+        sample_rate: Sample rate in Hz (Parakeet expects 16000).
 
     Returns:
         NumPy array of audio samples (mono, float32).
@@ -131,7 +137,7 @@ def record_until_silence(
 
 def transcribe(audio: np.ndarray) -> str:
     """
-    Transcribe audio to text using faster-whisper.
+    Transcribe audio to text using NVIDIA Parakeet (via onnx-asr).
 
     Args:
         audio: NumPy array of audio samples (mono, float32, 16kHz).
@@ -146,9 +152,15 @@ def transcribe(audio: np.ndarray) -> str:
     model = get_model()
 
     try:
-        segments, info = model.transcribe(audio, beam_size=1, language="en")
-        text = " ".join(segment.text.strip() for segment in segments).strip()
-        logger.info("Transcribed: '%s' (language=%s, prob=%.2f)", text, info.language, info.language_probability)
+        # onnx-asr accepts numpy arrays directly via recognize()
+        text = model.recognize(audio)
+
+        if isinstance(text, str):
+            text = text.strip()
+        else:
+            text = str(text).strip()
+
+        logger.info("Transcribed: '%s'", text)
         return text
     except Exception as e:
         logger.error("Transcription failed: %s", e)
@@ -189,3 +201,4 @@ def listen_smart() -> str:
         sample_rate=config.SAMPLE_RATE,
     )
     return transcribe(audio)
+

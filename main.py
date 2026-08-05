@@ -31,7 +31,14 @@ from ui.terminal_ui import (
     print_help, display_interaction, prompt_text_input,
 )
 
+import signal
+import sys
 
+def shutdown(sig, frame):
+    print("\nStopping...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, shutdown)
 # ─── Logging Setup ───────────────────────────────────────────────────
 
 def setup_logging() -> None:
@@ -48,7 +55,7 @@ def setup_logging() -> None:
         ],
     )
     # Suppress noisy libraries
-    logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+    logging.getLogger("nemo_logger").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 

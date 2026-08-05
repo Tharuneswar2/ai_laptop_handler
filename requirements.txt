@@ -1,8 +1,8 @@
 # ─── AI Laptop Voice Handler ─── Dependencies ───
 # Install: pip install -r requirements.txt
 
-# Voice — Speech-to-Text
-faster-whisper>=1.0.0
+# Voice — Speech-to-Text (NVIDIA Parakeet via onnx-asr)
+onnx-asr[gpu,hub]
 
 # Voice — Audio recording
 sounddevice>=0.4.6
