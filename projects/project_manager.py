@@ -1,17 +1,18 @@
 """
-projects/project_manager.py — Project Database and Project Manager for AI Desktop Agent.
+projects/project_manager.py — Enhanced Project Manager with Fuzzy Search & Ambiguity Handling.
 
-Maintains a database of software projects, detects frameworks, scans workspaces,
-and supports opening, listing, and querying projects.
+Maintains project database, detects project frameworks, handles project aliases,
+provides fuzzy matching, and handles project disambiguation.
 """
 
 import json
 import logging
+import re
 import sqlite3
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import config
 from brain.intent_parser import Intent
@@ -21,17 +22,23 @@ logger = logging.getLogger(__name__)
 
 PROJECTS_DB = config.DATA_DIR / "projects.db"
 DEFAULT_SCAN_DIRS = [
+    Path.home() / "Personal_Designs",
     Path.home() / "Projects",
     Path.home() / "Coding",
-    Path.home() / "Personal_Designs",
+    Path.home() / "Personal_Projects",
     Path.home() / "Workspace",
     Path.home(),
 ]
 
+KNOWN_ALIASES = {
+    "ai_laptop_handler": "ai laptop handler, nova, assistant, voice handler, laptop handler, ai handler",
+    "ai-laptop-handler": "ai laptop handler, nova, assistant, voice handler, laptop handler, ai handler",
+}
+
 
 class ProjectManager:
     """
-    Manages project tracking, persistence, framework detection, and scanning.
+    Project tracking database, fuzzy search, scanner, and ambiguity resolver.
     """
 
     def __init__(self, db_path: Path = None):
@@ -39,7 +46,7 @@ class ProjectManager:
         self._init_db()
 
     def _init_db(self) -> None:
-        """Initialize SQLite database table for projects."""
+        """Initialize SQLite database table for projects and migrate schema."""
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(str(self.db_path))
@@ -52,9 +59,18 @@ class ProjectManager:
                     git_repo    TEXT    DEFAULT '',
                     workspace   TEXT    DEFAULT '',
                     last_opened TEXT    DEFAULT '',
-                    tags        TEXT    DEFAULT ''
+                    aliases     TEXT    DEFAULT '',
+                    open_count  INTEGER DEFAULT 0
                 )
             """)
+            # Schema migration check
+            cursor = conn.execute("PRAGMA table_info(projects)")
+            cols = [row[1] for row in cursor.fetchall()]
+            if "aliases" not in cols:
+                conn.execute("ALTER TABLE projects ADD COLUMN aliases TEXT DEFAULT ''")
+            if "open_count" not in cols:
+                conn.execute("ALTER TABLE projects ADD COLUMN open_count INTEGER DEFAULT 0")
+
             conn.commit()
             conn.close()
             logger.info("Project database ready at %s", self.db_path)
@@ -62,7 +78,7 @@ class ProjectManager:
             logger.error("Failed to initialize project database: %s", e)
 
     def _detect_framework(self, path: Path) -> str:
-        """Detect software framework used in project path."""
+        """Detect framework by scanning files in directory."""
         if not path.exists() or not path.is_dir():
             return "Unknown"
 
@@ -108,105 +124,99 @@ class ProjectManager:
             return "Go"
         if "pom.xml" in files or "build.gradle" in files:
             return "Java/Kotlin"
+        if "composer.json" in files:
+            return "PHP"
 
         return "General"
 
-    def _get_git_repo(self, path: Path) -> str:
-        """Extract remote git origin URL if present."""
-        git_dir = path / ".git"
-        if not git_dir.exists():
-            return ""
-
-        try:
-            res = subprocess.run(
-                ["git", "remote", "get-url", "origin"],
-                cwd=str(path),
-                capture_output=True,
-                text=True,
-                timeout=2,
-            )
-            if res.returncode == 0:
-                return res.stdout.strip()
-        except Exception:
-            pass
-        return "git"
-
-    def add_project(
+    def register_project(
         self,
         name: str,
         path: str,
+        aliases: str = "",
         framework: str = None,
         tags: str = "",
     ) -> ToolResult:
-        """Add or update a project in the database."""
+        """Register or update project in database."""
         p_path = Path(path).expanduser().resolve()
         if not p_path.exists():
-            return ToolResult(success=False, message=f"Path does not exist: {path}")
+            return ToolResult(success=False, message=f"Project path does not exist: {path}")
 
         detected_framework = framework or self._detect_framework(p_path)
-        git_repo = self._get_git_repo(p_path)
         last_opened = datetime.now().isoformat()
+        clean_aliases = aliases or tags or KNOWN_ALIASES.get(name.lower(), "")
 
         try:
             conn = sqlite3.connect(str(self.db_path))
             conn.execute("""
-                INSERT INTO projects (name, path, framework, git_repo, workspace, last_opened, tags)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO projects (name, path, framework, git_repo, workspace, last_opened, aliases, open_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1)
                 ON CONFLICT(name) DO UPDATE SET
                     path=excluded.path,
                     framework=excluded.framework,
-                    git_repo=excluded.git_repo,
                     last_opened=excluded.last_opened,
-                    tags=excluded.tags
-            """, (name, str(p_path), detected_framework, git_repo, "", last_opened, tags))
+                    aliases=CASE WHEN excluded.aliases != '' THEN excluded.aliases ELSE projects.aliases END,
+                    open_count=projects.open_count + 1
+            """, (name, str(p_path), detected_framework, "", "", last_opened, clean_aliases))
             conn.commit()
             conn.close()
-            logger.info("Added project '%s' (%s) at %s", name, detected_framework, p_path)
-            return ToolResult(success=True, message=f"Tracked project '{name}' ({detected_framework}) at {p_path}")
+            return ToolResult(success=True, message=f"Registered project '{name}' ({detected_framework}) at {p_path}")
         except Exception as e:
-            logger.error("Failed to add project: %s", e)
-            return ToolResult(success=False, message=f"Failed to save project: {e}")
+            return ToolResult(success=False, message=f"Failed to register project: {e}")
+
+    def add_project(self, name: str, path: str, aliases: str = "", framework: str = None, tags: str = "") -> ToolResult:
+        """Alias for register_project."""
+        return self.register_project(name, path, aliases=aliases, framework=framework, tags=tags)
 
     def remove_project(self, name: str) -> ToolResult:
-        """Remove a project from tracking by name."""
+        """Remove a project from tracking."""
         try:
             conn = sqlite3.connect(str(self.db_path))
             cursor = conn.execute("DELETE FROM projects WHERE LOWER(name) = LOWER(?)", (name.strip(),))
             deleted = cursor.rowcount
             conn.commit()
             conn.close()
-
             if deleted > 0:
                 return ToolResult(success=True, message=f"Removed project tracking for '{name}'.")
-            return ToolResult(success=False, message=f"Project '{name}' not found in database.")
+            return ToolResult(success=False, message=f"Project '{name}' not found.")
         except Exception as e:
-            return ToolResult(success=False, message=f"Failed to remove project: {e}")
+            return ToolResult(success=False, message=f"Error removing project: {e}")
 
-    def scan_projects(self, max_depth: int = 2) -> ToolResult:
-        """Scan common project directories to auto-discover projects."""
+    def scan_projects(self) -> ToolResult:
+        """Scan system workspace folders for projects."""
         discovered = 0
+        project_indicators = [
+            ".git", "package.json", "pyproject.toml", "requirements.txt",
+            "Cargo.toml", "pom.xml", "go.mod", "composer.json", "main.py"
+        ]
+
         for base in DEFAULT_SCAN_DIRS:
             if not base.exists() or not base.is_dir():
                 continue
-
             try:
                 for item in base.iterdir():
                     if item.is_dir() and not item.name.startswith((".", "node_modules", "venv", "__pycache__")):
-                        # Check if directory looks like a project
-                        if (item / ".git").exists() or (item / "requirements.txt").exists() or (item / "package.json").exists() or (item / "main.py").exists():
-                            res = self.add_project(name=item.name, path=str(item))
+                        has_indicator = any((item / ind).exists() for ind in project_indicators)
+                        if has_indicator:
+                            res = self.register_project(name=item.name, path=str(item))
                             if res.success:
                                 discovered += 1
             except Exception as e:
                 logger.warning("Error scanning directory %s: %s", base, e)
 
+        projects = self.list_projects_data()
         return ToolResult(
             success=True,
-            message=f"Scanned project workspaces. Currently tracking {len(self.list_projects_data())} projects ({discovered} new/updated).",
+            message=f"Scanned workspace directories. Currently tracking {len(projects)} projects ({discovered} updated).",
+            data={"count": len(projects)},
         )
 
+    def refresh_database(self) -> ToolResult:
+        """Refresh database by re-scanning workspace directories."""
+        return self.scan_projects()
+
     def list_projects_data(self) -> List[Dict[str, Any]]:
-        """Fetch all tracked projects as dicts."""
+        """Fetch all tracked projects sorted by last opened timestamp."""
         try:
             conn = sqlite3.connect(str(self.db_path))
             conn.row_factory = sqlite3.Row
@@ -218,58 +228,85 @@ class ProjectManager:
             logger.error("Failed to list projects: %s", e)
             return []
 
-    def list_projects(self) -> ToolResult:
-        """Format and return all tracked projects."""
+    def search_project(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Fuzzy search for matching projects.
+        Returns a list of candidate project dicts matching the query.
+        """
+        if not query:
+            return []
+
+        q = query.lower().strip()
+        # Clean noise words
+        q_clean = re.sub(r"\b(open|project|the|my|in|vscode|vs code|code|repo)\b", "", q).strip()
+        if not q_clean:
+            q_clean = q
+
         projects = self.list_projects_data()
         if not projects:
-            # Try auto-scanning if database is empty
             self.scan_projects()
             projects = self.list_projects_data()
 
-        if not projects:
-            return ToolResult(success=True, message="No projects currently tracked.")
+        matches = []
+        seen_names = set()
 
-        lines = [f"• {p['name']} ({p['framework']}) → {p['path']}" for p in projects]
-        return ToolResult(
-            success=True,
-            message=f"Tracked Projects ({len(projects)}):\n" + "\n".join(lines),
-            data={"projects": projects},
-        )
-
-    def find_project(self, query: str) -> Optional[Dict[str, Any]]:
-        """Search for a project matching a query string (name, tag, path, framework)."""
-        if not query:
-            return None
-
-        q = query.lower().strip()
-        projects = self.list_projects_data()
-
-        # 1. Exact name match
         for p in projects:
-            if p["name"].lower() == q:
-                return p
+            p_name = p["name"].lower()
+            p_aliases = p.get("aliases", "").lower()
+            p_framework = p.get("framework", "").lower()
 
-        # 2. Substring name match
-        for p in projects:
-            if q in p["name"].lower() or p["name"].lower() in q:
-                return p
+            # 1. Exact name or alias match
+            if q_clean == p_name or (p_aliases and q_clean in [a.strip() for a in p_aliases.split(",")]):
+                if p["name"] not in seen_names:
+                    matches.insert(0, p)
+                    seen_names.add(p["name"])
+                    continue
 
-        # 3. Tag or framework match
-        for p in projects:
-            if q in p["framework"].lower() or q in p["tags"].lower():
-                return p
+            # 2. Substring match on name or aliases
+            if q_clean in p_name or (p_aliases and q_clean in p_aliases) or (p_name in q_clean):
+                if p["name"] not in seen_names:
+                    matches.append(p)
+                    seen_names.add(p["name"])
+                    continue
 
-        # 4. Fallback search on disk if not in DB
-        for base in DEFAULT_SCAN_DIRS:
-            candidate = base / query
-            if candidate.exists() and candidate.is_dir():
-                self.add_project(candidate.name, str(candidate))
-                return {"name": candidate.name, "path": str(candidate), "framework": self._detect_framework(candidate)}
+            # 3. Match on framework / tags
+            if q_clean in p_framework:
+                if p["name"] not in seen_names:
+                    matches.append(p)
+                    seen_names.add(p["name"])
 
-        return None
+        # 4. Fallback search on disk if database query yields no match
+        if not matches:
+            for base in DEFAULT_SCAN_DIRS:
+                candidate = base / q_clean
+                if candidate.exists() and candidate.is_dir():
+                    self.register_project(candidate.name, str(candidate))
+                    matches.append({"name": candidate.name, "path": str(candidate), "framework": self._detect_framework(candidate)})
+                    break
+
+        return matches
+
+    def find_project(self, query: str) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Find project matching query.
+        Returns Tuple: (single_exact_project_or_None, candidate_matches_list)
+        """
+        candidates = self.search_project(query)
+        if not candidates:
+            return (None, [])
+
+        if len(candidates) == 1:
+            return (candidates[0], candidates)
+
+        # Check if first candidate is an exact match
+        q_clean = re.sub(r"\b(open|project|the|my|in|vscode|vs code|code|repo)\b", "", query.lower()).strip()
+        if candidates[0]["name"].lower() == q_clean or q_clean.replace(" ", "_") == candidates[0]["name"].lower() or q_clean.replace(" ", "-") == candidates[0]["name"].lower():
+            return (candidates[0], candidates)
+
+        return (None, candidates)
 
     def open_recent_project(self) -> ToolResult:
-        """Fetch and mark the most recently accessed project."""
+        """Fetch the most recently accessed project."""
         projects = self.list_projects_data()
         if not projects:
             self.scan_projects()
@@ -279,7 +316,6 @@ class ProjectManager:
             return ToolResult(success=False, message="No recent projects found.")
 
         recent = projects[0]
-        # Update last_opened timestamp
         self.touch_project(recent["name"])
         return ToolResult(
             success=True,
@@ -288,11 +324,14 @@ class ProjectManager:
         )
 
     def touch_project(self, name: str) -> None:
-        """Update last_opened timestamp for project."""
+        """Update last_opened timestamp and open_count for project."""
         try:
             conn = sqlite3.connect(str(self.db_path))
-            conn.execute("UPDATE projects SET last_opened = ? WHERE LOWER(name) = LOWER(?)",
-                         (datetime.now().isoformat(), name.strip()))
+            conn.execute("""
+                UPDATE projects
+                SET last_opened = ?, open_count = open_count + 1
+                WHERE LOWER(name) = LOWER(?)
+            """, (datetime.now().isoformat(), name.strip()))
             conn.commit()
             conn.close()
         except Exception:
@@ -304,7 +343,7 @@ _project_manager_instance = None
 
 
 def get_project_manager() -> ProjectManager:
-    """Return the global ProjectManager instance."""
+    """Return global ProjectManager instance."""
     global _project_manager_instance
     if _project_manager_instance is None:
         _project_manager_instance = ProjectManager()
@@ -319,33 +358,56 @@ def handle(intent: Intent) -> ToolResult:
     params = intent.params
     pm = get_project_manager()
 
-    if action == "find":
-        query = params.get("name", "") or params.get("query", "")
-        p = pm.find_project(query)
-        if p:
-            pm.touch_project(p["name"])
+    if action in ("find", "find_project", "search_project"):
+        query = params.get("name", "") or params.get("query", "") or params.get("project_name", "")
+        single, candidates = pm.find_project(query)
+
+        if single:
+            pm.touch_project(single["name"])
             return ToolResult(
                 success=True,
-                message=f"Found project '{p['name']}' ({p['framework']}) at {p['path']}",
-                data={"project": p},
+                message=f"Found project '{single['name']}' ({single['framework']}) at {single['path']}",
+                data={"project": single, "path": single["path"]},
             )
-        return ToolResult(success=False, message=f"Project '{query}' not found.")
 
-    elif action == "open_recent":
+        if len(candidates) > 1:
+            # Format ambiguity resolution question
+            lines = [f"{i+1}. {p['name']} ({p['framework']}) → {p['path']}" for i, p in enumerate(candidates[:5])]
+            msg = f"I found {len(candidates)} matching projects:\n" + "\n".join(lines) + "\nWhich one would you like to open?"
+            return ToolResult(
+                success=True,
+                message=msg,
+                data={"ambiguous": True, "candidates": candidates[:5]},
+            )
+
+        return ToolResult(success=False, message=f"No matching project found for '{query}'.")
+
+    elif action in ("open_recent", "get_recent"):
         return pm.open_recent_project()
 
     elif action in ("list", "list_projects"):
-        return pm.list_projects()
+        projects = pm.list_projects_data()
+        if not projects:
+            pm.scan_projects()
+            projects = pm.list_projects_data()
 
-    elif action in ("scan", "scan_projects"):
+        lines = [f"• {p['name']} ({p['framework']}) → {p['path']}" for p in projects]
+        return ToolResult(
+            success=True,
+            message=f"Tracked Projects ({len(projects)}):\n" + "\n".join(lines),
+            data={"projects": projects},
+        )
+
+    elif action in ("scan", "scan_projects", "refresh_database"):
         return pm.scan_projects()
 
-    elif action == "add":
-        name = params.get("name", "")
+    elif action in ("add", "register", "register_project"):
+        name = params.get("name", "") or params.get("project_name", "")
         path = params.get("path", "")
-        return pm.add_project(name, path, tags=params.get("tags", ""))
+        aliases = params.get("aliases", "")
+        return pm.register_project(name, path, aliases=aliases)
 
-    elif action == "remove":
+    elif action in ("remove", "remove_project"):
         return pm.remove_project(params.get("name", ""))
 
     else:

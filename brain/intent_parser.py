@@ -224,6 +224,12 @@ def requires_confirmation(intent: Intent) -> bool:
 
 def is_goal_request(text: str) -> bool:
     """Check if the text represents a high-level goal requiring multi-step planning."""
+    from planner.reasoner import GoalReasoner, GoalType
+    reasoner = GoalReasoner()
+    goal = reasoner.detect_goal(text)
+    if goal.type in (GoalType.OPEN_PROJECT, GoalType.CONTINUE_PROJECT, GoalType.DEVELOPER_WORKSPACE):
+        return True
+
     lower = text.lower().strip()
     goal_patterns = [
         r"\b(start working|prepare for coding|start coding|coding mode)\b",

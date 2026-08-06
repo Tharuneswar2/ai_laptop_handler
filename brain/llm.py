@@ -147,6 +147,12 @@ class RuleBasedProvider(LLMProvider):
         (r"rename (.+) to (.+)", "file", "rename", lambda m: {"source": m.group(1).strip(), "new_name": m.group(2).strip()}),
         (r"(?:find|look for) (?:files? )?(?:called |named )?(.+)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
 
+        # Project & Workspace operations (placed before generic app opening)
+        (r"open (.+?)\s+(?:project|repository|repo)\s*(?:in\s+(?:vscode|vs code|code))?$", "vscode", "open_project", lambda m: {"name": m.group(1).strip()}),
+        (r"open (.+?)\s+(?:in|on)\s+(?:vscode|vs code|code)$", "vscode", "open_project", lambda m: {"name": m.group(1).strip()}),
+        (r"open (?:my\s+)?(?:last|latest|recent)\s+project$", "vscode", "open_recent", lambda m: {}),
+        (r"continue (?:my\s+|yesterday's\s+)?(?:work|project|backend)", "vscode", "open_recent", lambda m: {}),
+
         # App operations
         (r"open (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
         (r"launch (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),

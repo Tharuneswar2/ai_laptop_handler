@@ -1,16 +1,13 @@
 """
-tools/vscode_tool.py — Advanced VS Code project, file, and workspace automation.
+tools/vscode_tool.py — Upgraded VS Code Automation Tool.
 
+Executes `code <project_path>` directly to open project folders in VS Code.
 Supports:
-  - open_project
-  - open_recent
-  - create_project
-  - open_workspace
-  - open_file
-  - install_extension
-  - run_task
-  - run_terminal
-  - reopen_last_workspace
+  - open_project(path)
+  - open_recent()
+  - open_workspace(path)
+  - create_workspace(path)
+  - reopen_last_workspace()
 """
 
 import logging
@@ -27,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _run_code_cmd(args: list, cwd: Optional[str] = None) -> ToolResult:
-    """Execute `code` binary with safety checks."""
+    """Execute `code` binary with target arguments."""
     executable = "code.cmd" if os.name == "nt" else "code"
     cmd = [executable] + args
 
@@ -40,10 +37,10 @@ def _run_code_cmd(args: list, cwd: Optional[str] = None) -> ToolResult:
             cwd=cwd,
         )
         if res.returncode == 0:
-            return ToolResult(success=True, message=f"VS Code command executed: {' '.join(args)}")
+            return ToolResult(success=True, message=f"VS Code opened target: {' '.join(args)}")
         return ToolResult(success=False, message=f"VS Code failed: {res.stderr.strip() or res.stdout.strip()}")
     except FileNotFoundError:
-        # Fallback for Linux if 'code' isn't in standard PATH
+        # Fallback for Linux if 'code' isn't in PATH
         try:
             res = subprocess.run(
                 ["/usr/bin/code"] + args,
@@ -62,30 +59,44 @@ def _run_code_cmd(args: list, cwd: Optional[str] = None) -> ToolResult:
 
 
 def open_project(name: str = "", path: str = "") -> ToolResult:
-    """Open a project in VS Code by project name or path."""
+    """
+    Open a project directory directly in VS Code via `code <path>`.
+    Planner Rule: Always validate project path before launching!
+    """
     pm = get_project_manager()
     target_path = None
 
     if path:
         target_path = Path(path).expanduser().resolve()
     elif name:
-        proj = pm.find_project(name)
-        if proj:
-            target_path = Path(proj["path"])
+        single, candidates = pm.find_project(name)
+        if single:
+            target_path = Path(single["path"])
+        elif len(candidates) > 1:
+            lines = [f"{i+1}. {p['name']} ({p['framework']}) → {p['path']}" for i, p in enumerate(candidates[:5])]
+            msg = f"I found {len(candidates)} matching projects:\n" + "\n".join(lines) + "\nWhich one would you like to open?"
+            return ToolResult(
+                success=True,
+                message=msg,
+                data={"ambiguous": True, "candidates": candidates[:5]},
+            )
 
     if not target_path or not target_path.exists():
-        # Try search in default home
-        fallback = Path.home() / "Projects" / (name or "workspace")
-        if fallback.exists():
-            target_path = fallback
-        else:
-            return ToolResult(success=False, message=f"Project path not found: {name or path}")
+        return ToolResult(success=False, message=f"Cannot open VS Code: project path not found for '{name or path}'.")
 
-    # Track in project manager & context
-    pm.add_project(name=target_path.name, path=str(target_path))
+    # Update project last_opened timestamp and Memory context
+    pm.touch_project(target_path.name)
+    try:
+        from brain.memory import Memory
+        Memory().update_context("last_project", target_path.name)
+        Memory().update_context("last_opened_project", str(target_path))
+    except Exception:
+        pass
+
+    # Launch VS Code with project folder path!
     res = _run_code_cmd([str(target_path)])
     if res.success:
-        res.message = f"Opened project '{target_path.name}' in VS Code."
+        res.message = f"Opened project '{target_path.name}' in VS Code (`code {target_path}`)."
     return res
 
 
@@ -100,34 +111,16 @@ def open_recent() -> ToolResult:
     return open_project(path=proj.get("path", ""))
 
 
-def create_project(name: str, template: str = "python", path: str = "") -> ToolResult:
-    """Create a project directory structure and open it in VS Code."""
-    if not name:
-        return ToolResult(success=False, message="No project name provided.")
-
+def create_workspace(name: str = "workspace", path: str = "") -> ToolResult:
+    """Create a new .code-workspace file and open it."""
     base_dir = Path(path).expanduser().resolve() if path else Path.home() / "Projects"
-    proj_dir = base_dir / name
-    proj_dir.mkdir(parents=True, exist_ok=True)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    ws_file = base_dir / f"{name}.code-workspace"
 
-    # Initialize basic files according to template
-    if template.lower() == "fastapi":
-        (proj_dir / "main.py").write_text(
-            "from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get('/')\ndef read_root():\n    return {'status': 'ok'}\n"
-        )
-        (proj_dir / "requirements.txt").write_text("fastapi\nuvicorn\n")
-    elif template.lower() == "react":
-        (proj_dir / "package.json").write_text('{\n  "name": "' + name + '",\n  "version": "1.0.0"\n}\n')
-    else:
-        (proj_dir / "main.py").write_text("# Main entry point\n\ndef main():\n    print('Hello World')\n\nif __name__ == '__main__':\n    main()\n")
+    content = '{\n  "folders": [\n    {\n      "path": "."\n    }\n  ]\n}\n'
+    ws_file.write_text(content, encoding="utf-8")
 
-    (proj_dir / "README.md").write_text(f"# {name}\n\nCreated by Nova AI Agent.\n")
-
-    # Track project
-    pm = get_project_manager()
-    pm.add_project(name=name, path=str(proj_dir), framework=template)
-
-    # Open in VS Code
-    return open_project(path=str(proj_dir))
+    return _run_code_cmd([str(ws_file)])
 
 
 def open_workspace(path: str) -> ToolResult:
@@ -138,36 +131,13 @@ def open_workspace(path: str) -> ToolResult:
     return _run_code_cmd([str(ws_path)])
 
 
-def open_file(path: str, line: Optional[int] = None) -> ToolResult:
-    """Open a specific file in VS Code, optionally at a line number."""
-    f_path = Path(path).expanduser().resolve()
-    if not f_path.exists():
-        return ToolResult(success=False, message=f"File not found: {path}")
-
-    arg = f"{f_path}:{line}" if line else str(f_path)
-    return _run_code_cmd(["-g", arg])
-
-
-def install_extension(extension_id: str) -> ToolResult:
-    """Install a VS Code extension by identifier (e.g. ms-python.python)."""
-    if not extension_id:
-        return ToolResult(success=False, message="Extension ID required.")
-    return _run_code_cmd(["--install-extension", extension_id])
-
-
-def run_task(task_name: str) -> ToolResult:
-    """Trigger a configured task in VS Code workspace."""
-    return ToolResult(success=True, message=f"VS Code task '{task_name}' triggered via workspace runner.")
-
-
-def run_terminal(command: str) -> ToolResult:
-    """Run command in VS Code active integrated terminal."""
-    from tools import terminal_tools
-    return terminal_tools.run_command(command)
-
-
 def reopen_last_workspace() -> ToolResult:
-    """Reopen VS Code with the last session/workspace."""
+    """Reopen VS Code with the last active workspace/session."""
+    pm = get_project_manager()
+    recent_res = pm.open_recent_project()
+    if recent_res.success:
+        proj = recent_res.data.get("project", {})
+        return open_project(path=proj.get("path", ""))
     return _run_code_cmd(["-r", "."])
 
 
@@ -177,28 +147,21 @@ def handle(intent: Intent) -> ToolResult:
     """Route VS Code actions."""
     action = intent.action
     params = intent.params
+    name = params.get("name", "") or params.get("project_name", "")
+    path = params.get("path", "") or params.get("project_path", "")
 
     if action in ("open_project", "open"):
-        return open_project(name=params.get("name", ""), path=params.get("path", ""))
-    elif action == "open_recent":
+        return open_project(name=name, path=path)
+    elif action in ("open_recent", "open_latest_project"):
         return open_recent()
-    elif action == "create_project":
-        return create_project(
-            name=params.get("name", ""),
-            template=params.get("template", "python"),
-            path=params.get("path", ""),
-        )
-    elif action == "open_workspace":
-        return open_workspace(params.get("path", ""))
-    elif action == "open_file":
-        return open_file(params.get("path", ""), params.get("line"))
-    elif action == "install_extension":
-        return install_extension(params.get("extension_id", ""))
-    elif action == "run_task":
-        return run_task(params.get("task_name", ""))
-    elif action == "run_terminal":
-        return run_terminal(params.get("command", ""))
+    elif action in ("open_workspace", "create_workspace"):
+        if action == "create_workspace":
+            return create_workspace(name=name or "workspace", path=path)
+        return open_workspace(path=path)
     elif action == "reopen_last_workspace":
         return reopen_last_workspace()
     else:
-        return ToolResult(success=False, message=f"Unknown VS Code action: {action}")
+        # Default fallback: open project if path/name present, else open recent
+        if name or path:
+            return open_project(name=name, path=path)
+        return open_recent()

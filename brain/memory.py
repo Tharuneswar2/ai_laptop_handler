@@ -124,22 +124,38 @@ class Memory:
         # 3. "open it" / "launch it"
         if re.search(r"^\b(open|launch)\s+it\b", lower):
             last_app = _CONTEXT_STATE.get("last_app")
-            last_proj = _CONTEXT_STATE.get("last_project")
+            last_proj = _CONTEXT_STATE.get("last_project") or _CONTEXT_STATE.get("last_opened_project")
             target = last_proj or last_app
             if target:
                 return f"open {target}"
 
-        # 4. "close it"
+        # 4. "open my last project" / "open my latest project" / "continue yesterday's work"
+        if re.search(r"\bopen\s+(my\s+)?(last|latest|recent)\s+project\b", lower) or "continue yesterday" in lower:
+            last_proj = _CONTEXT_STATE.get("last_opened_project") or _CONTEXT_STATE.get("last_project")
+            if last_proj:
+                return f"open project {last_proj}"
+            return "open recent project"
+
+        # 5. "open it again" / "run it again"
+        if re.search(r"\b(open|run)\s+it\s+again\b", lower):
+            last_cmd = _CONTEXT_STATE.get("last_command")
+            last_proj = _CONTEXT_STATE.get("last_project")
+            if last_cmd:
+                return last_cmd
+            if last_proj:
+                return f"open project {last_proj}"
+
+        # 6. "close it"
         if re.search(r"^\bclose\s+it\b", lower):
             last_app = _CONTEXT_STATE.get("last_app")
             if last_app:
                 return f"close {last_app}"
 
-        # 5. "open my backend" / "open backend"
+        # 7. "open my backend" / "open backend"
         if re.search(r"\bopen\s+(my\s+)?backend\b", lower):
             return "open project backend"
 
-        # 6. "open the last pdf" / "open newest pdf"
+        # 8. "open the last pdf" / "open newest pdf"
         if re.search(r"\bopen\s+(the\s+)?(last|newest|recent)\s+pdf\b", lower):
             return "open newest pdf"
 
