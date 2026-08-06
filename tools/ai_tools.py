@@ -13,18 +13,14 @@ from router.tool_router import ToolResult
 logger = logging.getLogger(__name__)
 
 
-def _get_llm_response(prompt: str) -> str:
-    """Get a text response from the best available LLM provider."""
-    from brain.llm import get_provider, RuleBasedProvider
+def _get_llm_response(prompt: str, system_prompt: str = "") -> str:
+    """Get a free-form text response from the best available LLM provider."""
+    from brain.llm import CHAT_SYSTEM_PROMPT, get_provider
 
     provider = get_provider()
 
-    # Rule-based provider can't do free-form text generation
-    if isinstance(provider, RuleBasedProvider):
-        return ""
-
     try:
-        return provider.generate(prompt)
+        return provider.generate_text(prompt, system_prompt or CHAT_SYSTEM_PROMPT)
     except Exception as e:
         logger.error("LLM generation failed: %s", e)
         return ""

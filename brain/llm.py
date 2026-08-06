@@ -1,22 +1,96 @@
 """
 brain/llm.py — LLM abstraction layer.
 
-Provides a unified interface for generating text from different backends:
+Provides a unified interface for two distinct tasks:
+  - Intent extraction: turn a user command into a structured JSON intent.
+  - Free-form text generation: chat, summaries, code explanations.
+
+Backends:
   - RuleBasedProvider: keyword/regex matching (default, fully offline)
   - OllamaProvider:    local Ollama server (optional)
   - GeminiProvider:    Google Gemini API (optional, requires API key)
 
 Usage:
     provider = get_provider()
-    result = provider.generate("open chrome")
+    intent_json = provider.generate("open chrome")             # structured intent
+    answer = provider.generate_text("hi", CHAT_SYSTEM_PROMPT)  # free-form text
+
+Intent extraction uses Pydantic structured output (Ollama `format=<json schema>`)
+so the model is constrained to return valid, schema-checked JSON.
 """
 
 import json
 import logging
 import re
 from abc import ABC, abstractmethod
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+try:
+    import ollama
+except ImportError:
+    ollama = None
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Structured Output Schema ─────────────────────────────────────────
+
+class IntentResponse(BaseModel):
+    """
+    Pydantic schema for intent extraction.
+
+    Passed to Ollama as `format=IntentResponse.model_json_schema()` so the
+    model must emit JSON matching this structure; the result is re-validated
+    with `model_validate_json` for a canonical dict.
+    """
+    tool: Literal["file", "app", "browser", "system", "terminal", "ai"]
+    action: str = ""
+    params: dict = Field(default_factory=dict)
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+# ─── Default System Prompts ───────────────────────────────────────────
+
+CHAT_SYSTEM_PROMPT = (
+    "You are Nova, a friendly desktop assistant running on the user's laptop. "
+    "Answer questions concisely and helpfully in plain natural language. "
+    "Never output JSON or markdown unless the user asks for it."
+)
+
+INTENT_SYSTEM_PROMPT = """You are an intent extraction engine for a voice-controlled Windows laptop assistant.
+Extract the user's command into a JSON object with EXACTLY these keys:
+- "tool": one of "file", "app", "browser", "system", "terminal", "ai"
+- "action": the action to perform (see valid actions below)
+- "params": a JSON object of parameters for the action
+- "confidence": a float between 0 and 1
+
+RULES:
+1. To open, launch, or start an application, ALWAYS use tool "app", action "open",
+   with params {"app_name": "<app name>"}. NEVER use "terminal" for this.
+2. "open file explorer" maps to tool "app", action "open", params {"app_name": "file explorer"}.
+3. Use "terminal" only for real shell commands (list files, show directory, check versions).
+4. Use "browser" for web searches and opening websites.
+
+Valid actions per tool:
+- file: create_file, create_folder, move, rename, delete, search
+- app: open, close, list
+- browser: open_url, google_search, youtube_search, open_github
+- system: battery, ram, cpu, disk, volume, brightness, screenshot, lock_screen
+- terminal: run
+- ai: summarize, explain_code, chat
+
+Examples:
+User: "open vs code" -> {"tool": "app", "action": "open", "params": {"app_name": "vs code"}, "confidence": 0.98}
+User: "open chrome and search for weather" -> {"tool": "browser", "action": "google_search", "params": {"query": "weather"}, "confidence": 0.95}
+User: "open file explorer" -> {"tool": "app", "action": "open", "params": {"app_name": "file explorer"}, "confidence": 0.98}
+User: "what is my battery level" -> {"tool": "system", "action": "battery", "params": {}, "confidence": 0.98}
+User: "list files" -> {"tool": "terminal", "action": "run", "params": {"command": "ls"}, "confidence": 0.95}
+User: "create a folder called projects" -> {"tool": "file", "action": "create_folder", "params": {"path": "projects"}, "confidence": 0.98}
+User: "take a screenshot" -> {"tool": "system", "action": "screenshot", "params": {}, "confidence": 0.98}
+
+Respond with ONLY the JSON object. No markdown fences, no extra text."""
 
 
 # ─── Base Provider ────────────────────────────────────────────────────
@@ -26,7 +100,12 @@ class LLMProvider(ABC):
 
     @abstractmethod
     def generate(self, prompt: str) -> str:
-        """Generate a response from the given prompt. Returns JSON string."""
+        """Generate a structured intent JSON string for the given command."""
+        ...
+
+    @abstractmethod
+    def generate_text(self, prompt: str, system_prompt: str = "") -> str:
+        """Generate free-form text (chat / summarize / explain)."""
         ...
 
     @abstractmethod
@@ -129,6 +208,10 @@ class RuleBasedProvider(LLMProvider):
         logger.info("No rule matched for: '%s', falling back to AI chat.", text)
         return json.dumps(intent)
 
+    def generate_text(self, prompt: str, system_prompt: str = "") -> str:
+        """Rule-based provider cannot produce free-form text."""
+        return ""
+
     def is_available(self) -> bool:
         return True
 
@@ -136,64 +219,66 @@ class RuleBasedProvider(LLMProvider):
 # ─── Ollama Provider (optional) ──────────────────────────────────────
 
 class OllamaProvider(LLMProvider):
-    """Connect to a local Ollama server for intent extraction."""
+    """Connect to a local Ollama server for intent extraction and chat."""
 
-    SYSTEM_PROMPT = """You are an intent extraction engine for a voice-controlled laptop assistant.
-Given a user command, extract the intent as a JSON object with these fields:
-- "tool": one of "file", "app", "browser", "system", "terminal", "ai"
-- "action": the specific action to perform
-- "params": a dict of parameters for the action
-- "confidence": float between 0 and 1
-
-Valid actions per tool:
-- file: create_file, create_folder, move, rename, delete, search
-- app: open, close, list
-- browser: open_url, google_search, youtube_search, open_github
-- system: battery, ram, cpu, disk, volume, brightness, screenshot, lock_screen
-- terminal: run
-- ai: summarize, explain_code, chat
-
-Respond ONLY with valid JSON. No extra text."""
+    INTENT_SYSTEM_PROMPT = INTENT_SYSTEM_PROMPT
+    CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT
 
     def __init__(self):
         import config
         self.model = config.OLLAMA_MODEL
         self.url = config.OLLAMA_URL
 
+    @property
+    def _client(self) -> "ollama.Client":
+        """Lazily build the Ollama client for the configured URL."""
+        if ollama is None:
+            raise RuntimeError("The 'ollama' python package is not installed.")
+        return ollama.Client(host=self.url)
+
     def generate(self, prompt: str) -> str:
-        """Send prompt to Ollama and return the response."""
-        import urllib.request
+        """
+        Extract a structured intent JSON string from the user command.
 
-        payload = json.dumps({
-            "model": self.model,
-            "prompt": prompt,
-            "system": self.SYSTEM_PROMPT,
-            "stream": False,
-            "format": "json",
-        }).encode()
-
-        req = urllib.request.Request(
-            f"{self.url}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-
+        Uses Pydantic structured output: the model is given the JSON schema
+        for IntentResponse and the reply is validated back through it.
+        """
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                result = json.loads(resp.read().decode())
-                return result.get("response", "{}")
+            response = self._client.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.INTENT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                format=IntentResponse.model_json_schema(),
+            )
+            intent = IntentResponse.model_validate_json(response.message.content)
+            return intent.model_dump_json()
         except Exception as e:
-            logger.error("Ollama request failed: %s", e)
+            logger.error("Ollama intent request failed: %s", e)
             return json.dumps({"tool": "ai", "action": "chat", "params": {"text": prompt}, "confidence": 0.2})
+
+    def generate_text(self, prompt: str, system_prompt: str = "") -> str:
+        """Generate free-form text (chat / summarize / explain)."""
+        system = system_prompt or self.CHAT_SYSTEM_PROMPT
+        try:
+            response = self._client.chat(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            return response.message.content
+        except Exception as e:
+            logger.error("Ollama chat request failed: %s", e)
+            return ""
 
     def is_available(self) -> bool:
         """Check if Ollama server is running."""
-        import urllib.request
-
         try:
-            req = urllib.request.Request(f"{self.url}/api/tags")
-            with urllib.request.urlopen(req, timeout=3):
-                return True
+            self._client.list()
+            return True
         except Exception:
             return False
 
@@ -201,36 +286,53 @@ Respond ONLY with valid JSON. No extra text."""
 # ─── Gemini Provider (optional) ──────────────────────────────────────
 
 class GeminiProvider(LLMProvider):
-    """Use Google Gemini API for intent extraction (requires API key)."""
+    """Use Google Gemini API for intent extraction and chat (requires API key)."""
 
-    SYSTEM_PROMPT = OllamaProvider.SYSTEM_PROMPT  # reuse the same system prompt
+    INTENT_SYSTEM_PROMPT = INTENT_SYSTEM_PROMPT
+    CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT
 
     def __init__(self):
         import config
         self.api_key = config.GEMINI_API_KEY
         self.model = config.GEMINI_MODEL
 
-    def generate(self, prompt: str) -> str:
-        """Send prompt to Gemini API and return the response."""
+    def _request(self, system_prompt: str, user_prompt: str, mime: str) -> str:
+        """Send a prompt to Gemini and return the raw response text."""
         import urllib.request
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
 
         payload = json.dumps({
-            "contents": [{"parts": [{"text": f"{self.SYSTEM_PROMPT}\n\nUser command: {prompt}"}]}],
-            "generationConfig": {"responseMimeType": "application/json"},
+            "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser command: {user_prompt}"}]}],
+            "generationConfig": {"responseMimeType": mime},
         }).encode()
 
         req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
 
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode())
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+
+    def generate(self, prompt: str) -> str:
+        """Extract a structured intent JSON string from the user command."""
         try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read().decode())
-                text = result["candidates"][0]["content"]["parts"][0]["text"]
+            text = self._request(self.INTENT_SYSTEM_PROMPT, prompt, "application/json")
+            try:
+                return IntentResponse.model_validate_json(text).model_dump_json()
+            except Exception:
                 return text
         except Exception as e:
-            logger.error("Gemini API request failed: %s", e)
+            logger.error("Gemini intent request failed: %s", e)
             return json.dumps({"tool": "ai", "action": "chat", "params": {"text": prompt}, "confidence": 0.2})
+
+    def generate_text(self, prompt: str, system_prompt: str = "") -> str:
+        """Generate free-form text (chat / summarize / explain)."""
+        system = system_prompt or self.CHAT_SYSTEM_PROMPT
+        try:
+            return self._request(system, prompt, "text/plain")
+        except Exception as e:
+            logger.error("Gemini chat request failed: %s", e)
+            return ""
 
     def is_available(self) -> bool:
         return bool(self.api_key)

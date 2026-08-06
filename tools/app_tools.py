@@ -2,10 +2,11 @@
 tools/app_tools.py — Application management (open, close, list).
 
 Uses configurable app-name → command mappings from config.py.
-Linux-first, with safe subprocess usage (shell=False).
+Cross-platform: `cmd /c start` on Windows, direct exec on Linux/macOS.
 """
 
 import logging
+import os
 import subprocess
 
 from brain.intent_parser import Intent
@@ -22,28 +23,50 @@ def _get_app_command(app_name: str) -> str | None:
     return config.APP_MAPPINGS.get(name)
 
 
+def _process_name(command: str) -> str:
+    """Derive a process image name (exe on Windows) from a launch command."""
+    base = command.split(" ")[0].split("/")[-1]
+    if os.name == "nt" and not base.lower().endswith(".exe"):
+        return base + ".exe"
+    return base
+
+
 def open_app(app_name: str) -> ToolResult:
     """
     Open an application by its friendly name.
 
     Args:
-        app_name: Friendly name like "chrome", "vs code", "terminal".
+        app_name: Friendly name like "chrome", "vs code", "file explorer".
     """
-    command = _get_app_command(app_name)
+    name = (app_name or "").lower().strip()
+    if not name:
+        return ToolResult(
+            success=False,
+            message="I didn't catch which app to open. Please repeat the app name.",
+        )
 
-    if not command:
-        # Try running the name directly as a command
-        command = app_name.lower().strip()
-        logger.info("App '%s' not in mappings, trying direct command: '%s'", app_name, command)
+    import config
+
+    command = config.APP_MAPPINGS.get(name, name)
+    logger.info("Opening app '%s' (command: '%s')", name, command)
 
     try:
-        subprocess.Popen(
-            [command],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        logger.info("Opened app: %s (command: %s)", app_name, command)
+        if os.name == "nt":
+            # `start "" <name>` resolves registered apps from PATH / App Paths
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                shell=False,
+            )
+        else:
+            subprocess.Popen(
+                [command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        logger.info("Opened app: %s", app_name)
         return ToolResult(success=True, message=f"Opened {app_name}.")
     except FileNotFoundError:
         return ToolResult(success=False, message=f"App '{app_name}' not found. Is it installed?")
@@ -55,9 +78,11 @@ def close_app(app_name: str) -> ToolResult:
     """
     Close an application (requires confirmation).
 
-    Uses `pkill` to send SIGTERM to the process.
+    Uses `taskkill` on Windows and `pkill` on Linux/macOS.
     """
-    command = _get_app_command(app_name) or app_name.lower().strip()
+    import config
+
+    command = config.APP_MAPPINGS.get(app_name.lower().strip(), app_name.lower().strip())
 
     # Confirmation
     try:
@@ -68,12 +93,17 @@ def close_app(app_name: str) -> ToolResult:
         return ToolResult(success=False, message="Close cancelled.")
 
     try:
-        # Get the process name (basename of the command)
-        proc_name = command.split("/")[-1]
-        result = subprocess.run(
-            ["pkill", "-f", proc_name],
-            capture_output=True, text=True, timeout=5,
-        )
+        proc_name = _process_name(command)
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/IM", proc_name, "/F"],
+                capture_output=True, text=True, timeout=5,
+            )
+        else:
+            result = subprocess.run(
+                ["pkill", "-f", proc_name],
+                capture_output=True, text=True, timeout=5,
+            )
         if result.returncode == 0:
             logger.info("Closed app: %s", app_name)
             return ToolResult(success=True, message=f"Closed {app_name}.")
@@ -89,16 +119,25 @@ def list_running_apps() -> ToolResult:
 
     running = []
     try:
-        result = subprocess.run(
-            ["ps", "-eo", "comm"], capture_output=True, text=True, timeout=5,
-        )
-        running_procs = set(result.stdout.strip().split("\n"))
+        if os.name == "nt":
+            result = subprocess.run(
+                ["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True, timeout=5,
+            )
+            running_procs = {
+                line.split(",")[0].strip('"').lower()
+                for line in result.stdout.strip().splitlines()
+                if line.strip()
+            }
+        else:
+            result = subprocess.run(
+                ["ps", "-eo", "comm"], capture_output=True, text=True, timeout=5,
+            )
+            running_procs = set(result.stdout.strip().split("\n"))
 
         for app_name, command in config.APP_MAPPINGS.items():
-            proc_name = command.split("/")[-1]
-            if proc_name in running_procs:
-                if app_name not in running:
-                    running.append(app_name)
+            proc_name = _process_name(command).lower()
+            if proc_name in running_procs and app_name not in running:
+                running.append(app_name)
 
         if running:
             app_list = ", ".join(running)

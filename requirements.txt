@@ -7,6 +7,10 @@ pyttsx3>=2.90
 # System monitoring
 psutil>=5.9.0
 
+# LLM client + structured output (brain/llm.py)
+ollama>=0.6.0
+pydantic>=2.9.0
+
 # Terminal UI
 rich>=13.0.0
 

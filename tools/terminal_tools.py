@@ -6,6 +6,7 @@ including rm, sudo, pipes, redirects, and arbitrary shell execution.
 """
 
 import logging
+import os
 import re
 import subprocess
 
@@ -54,6 +55,27 @@ def _is_command_allowed(command: str) -> bool:
     return False
 
 
+def _translate_windows_command(command: str) -> str:
+    """Translate common POSIX commands to Windows cmd equivalents."""
+    if not command.strip():
+        return command
+
+    mapping = {
+        "ls": "dir",
+        "pwd": "cd",
+        "clear": "cls",
+        "cat ": "type ",
+        "mv ": "move ",
+        "cp ": "copy ",
+    }
+    translated = command
+    for src, dst in mapping.items():
+        if translated == src.strip() or translated.startswith(src):
+            translated = dst + translated[len(src):]
+            break
+    return translated
+
+
 def run_command(command: str) -> ToolResult:
     """
     Execute an allowed terminal command and return its output.
@@ -67,6 +89,9 @@ def run_command(command: str) -> ToolResult:
     if not command:
         return ToolResult(success=False, message="No command provided.")
 
+    if os.name == "nt":
+        command = _translate_windows_command(command)
+
     if not _is_command_allowed(command):
         return ToolResult(
             success=False,
@@ -75,13 +100,23 @@ def run_command(command: str) -> ToolResult:
         )
 
     try:
-        result = subprocess.run(
-            command.split(),
-            capture_output=True,
-            text=True,
-            timeout=config.TERMINAL_TIMEOUT,
-            cwd=str(config.PROJECT_ROOT),
-        )
+        if os.name == "nt":
+            # Windows shell builtins (dir, ver, cls) require cmd.exe
+            result = subprocess.run(
+                ["cmd", "/c", command],
+                capture_output=True,
+                text=True,
+                timeout=config.TERMINAL_TIMEOUT,
+                cwd=str(config.PROJECT_ROOT),
+            )
+        else:
+            result = subprocess.run(
+                command.split(),
+                capture_output=True,
+                text=True,
+                timeout=config.TERMINAL_TIMEOUT,
+                cwd=str(config.PROJECT_ROOT),
+            )
 
         output = result.stdout.strip()
         errors = result.stderr.strip()

@@ -6,6 +6,7 @@ Uses psutil for cross-platform metrics and Linux-specific commands for controls.
 """
 
 import logging
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -26,8 +27,9 @@ def battery_status() -> ToolResult:
         percent = battery.percent
         plugged = "charging" if battery.power_plugged else "on battery"
         time_left = ""
-        if battery.secsleft > 0 and not battery.power_plugged:
-            h, m = battery.secsleft // 3600, (battery.secsleft % 3600) // 60
+        secsleft = battery.secsleft
+        if secsleft is not None and 0 < secsleft < 7 * 24 * 3600 and not battery.power_plugged:
+            h, m = secsleft // 3600, (secsleft % 3600) // 60
             time_left = f", ~{h}h {m}m remaining"
         return ToolResult(success=True, message=f"Battery: {percent}% ({plugged}{time_left}).",
                           data={"percent": percent, "plugged": battery.power_plugged})
@@ -65,7 +67,8 @@ def disk_usage() -> ToolResult:
     """Get disk usage for the root partition."""
     try:
         import psutil
-        disk = psutil.disk_usage("/")
+        root = os.environ.get("SystemDrive", "C:\\") + "\\" if os.name == "nt" else "/"
+        disk = psutil.disk_usage(root)
         used_gb = disk.used / (1024 ** 3)
         total_gb = disk.total / (1024 ** 3)
         free_gb = disk.free / (1024 ** 3)
@@ -76,9 +79,26 @@ def disk_usage() -> ToolResult:
         return ToolResult(success=False, message=f"Failed to get disk info: {e}")
 
 
+def _set_volume_windows(level: int) -> bool:
+    """Set the default playback volume via Windows shell volume up/down keys."""
+    import ctypes
+    from ctypes import wintypes
+
+    WAVE_VOLUME_MAX = 0xFFFF
+    target = int(level / 100.0 * WAVE_VOLUME_MAX)
+    return ctypes.windll.winmm.waveOutSetVolume(0, (target << 16) | target) == 0
+
+
 def set_volume(level: int) -> ToolResult:
-    """Set system volume (0-100) using amixer (Linux)."""
+    """Set system volume (0-100)."""
     level = max(0, min(100, level))
+    if os.name == "nt":
+        try:
+            if _set_volume_windows(level):
+                return ToolResult(success=True, message=f"Volume set to {level}%.")
+        except Exception as e:
+            logger.warning("Windows volume control failed: %s", e)
+        return ToolResult(success=False, message="Volume control not available on this system.")
     try:
         subprocess.run(["amixer", "set", "Master", f"{level}%"], capture_output=True, timeout=5)
         return ToolResult(success=True, message=f"Volume set to {level}%.")
@@ -91,6 +111,8 @@ def set_volume(level: int) -> ToolResult:
 def set_brightness(level: int) -> ToolResult:
     """Set screen brightness (0-100) using brightnessctl or xrandr."""
     level = max(0, min(100, level))
+    if os.name == "nt":
+        return ToolResult(success=False, message="Brightness control not available on this system.")
     try:
         subprocess.run(["brightnessctl", "set", f"{level}%"], capture_output=True, timeout=5)
         return ToolResult(success=True, message=f"Brightness set to {level}%.")
@@ -114,6 +136,15 @@ def take_screenshot() -> ToolResult:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filepath = Path.home() / "Pictures" / f"screenshot_{ts}.png"
     filepath.parent.mkdir(parents=True, exist_ok=True)
+
+    if os.name == "nt":
+        try:
+            from PIL import ImageGrab
+            ImageGrab.grab().save(str(filepath))
+            return ToolResult(success=True, message=f"Screenshot saved to {filepath}.")
+        except Exception as e:
+            return ToolResult(success=False, message=f"Screenshot failed: {e}")
+
     for cmd in [["scrot", str(filepath)], ["gnome-screenshot", "-f", str(filepath)]]:
         try:
             subprocess.run(cmd, capture_output=True, timeout=10)
@@ -125,7 +156,17 @@ def take_screenshot() -> ToolResult:
 
 
 def lock_screen() -> ToolResult:
-    """Lock the screen (Linux)."""
+    """Lock the screen (Windows or Linux)."""
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["rundll32.exe", "user32.dll,LockWorkStation"],
+                capture_output=True, timeout=5,
+            )
+            return ToolResult(success=True, message="Screen locked.")
+        except Exception as e:
+            return ToolResult(success=False, message=f"Failed to lock screen: {e}")
+
     for cmd in [["loginctl", "lock-session"], ["gnome-screensaver-command", "-l"], ["xdg-screensaver", "lock"]]:
         try:
             subprocess.run(cmd, capture_output=True, timeout=5)

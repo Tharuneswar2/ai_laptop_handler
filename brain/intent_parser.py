@@ -7,6 +7,7 @@ and returns a validated Intent dataclass ready for routing.
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,91 @@ def parse_json_safely(raw: str) -> dict:
     except json.JSONDecodeError as e:
         logger.warning("JSON parse failed: %s — raw: %s", e, raw[:200])
         return {}
+
+
+# LLM providers sometimes route "open X" to the wrong tool. These verbs
+# always mean "launch an application", so they can be safely remapped.
+_OPEN_VERB_RE = re.compile(r"^(open|launch|start)\s+(.+)$", re.IGNORECASE)
+_OPEN_COMMAND_RE = re.compile(r"^(?:open|launch|start)(?:\s+-a)?\s+(.+)$", re.IGNORECASE)
+
+# System actions the model invents that are really "open file explorer".
+_FILE_EXPLORER_ACTIONS = {
+    "open_file_explorer", "open_file_manager", "open_explorer", "explore",
+    "open_files", "file_explorer", "show_file_explorer",
+}
+
+
+def _normalize_data(data: dict, raw_text: str) -> dict:
+    """
+    Correct common LLM mis-routes before validation.
+
+    Fixes observed failures such as:
+      - "open vs code"      → terminal.run with a hallucinated command
+      - "open file explorer" → system.open_file_explorer (invalid action)
+
+    Args:
+        data: Raw intent dict from the LLM provider.
+        raw_text: Original user command.
+
+    Returns:
+        Corrected intent dict.
+    """
+    if not data:
+        return data
+
+    tool = str(data.get("tool", "")).lower().strip()
+    action = str(data.get("action", "")).lower().strip()
+    params = data.get("params", {})
+    if not isinstance(params, dict):
+        params = {}
+    confidence = float(data.get("confidence", 0.5))
+
+    def _remap(new_tool: str, new_action: str, new_params: dict, conf: float) -> dict:
+        return {"tool": new_tool, "action": new_action, "params": new_params, "confidence": conf}
+
+    # system.open_file_explorer → app.open "file explorer"
+    if tool == "system" and action in _FILE_EXPLORER_ACTIONS:
+        return _remap("app", "open", {"app_name": "file explorer"}, max(confidence, 0.7))
+
+    # terminal.run that actually contains app-launch syntax (e.g. "open -a VSCode")
+    if tool == "terminal" and action == "run":
+        cmd = str(params.get("command", "")).strip()
+        m = _OPEN_COMMAND_RE.match(cmd)
+        if m:
+            return _remap("app", "open", {"app_name": m.group(1).strip()}, max(confidence, 0.7))
+
+    # "open chrome and search X" → browser.google_search
+    if tool == "app" and action == "open":
+        app_name = str(params.get("app_name", ""))
+        m = re.match(r"^(.+?)\s+and\s+search\s+(.+)$", app_name, re.IGNORECASE)
+        if m:
+            return _remap("browser", "google_search", {"query": m.group(2).strip()}, max(confidence, 0.6))
+
+    # Raw text explicitly says "open/launch X" but the model sent it to a
+    # destination that cannot open apps (chat fallback, system, terminal.run).
+    if tool in ("ai", "system") or (tool == "terminal" and action == "run"):
+        m = _OPEN_VERB_RE.match(raw_text.strip())
+        if m and m.group(1).lower() != "start":
+            return _remap("app", "open", {"app_name": m.group(2).strip()}, max(confidence, 0.8))
+
+    # Bare acknowledgments must never trigger system/terminal/app actions
+    if re.fullmatch(
+        r"(?:yes|yeah|yep|yup|no|nope|ok|okay|sure|alright|thanks|thank you|hi|hello|hey)[\s.,!?]*",
+        raw_text.strip(), re.IGNORECASE,
+    ):
+        if tool != "ai":
+            return _remap("ai", "chat", {"text": raw_text.strip()}, max(confidence, 0.3))
+
+    # Conversational questions the model over-eagerly turned into a web search
+    if tool == "browser" and action == "google_search":
+        if re.match(r"^(?:tell me about|tell me|explain|define)\b", raw_text.strip(), re.IGNORECASE):
+            return _remap("ai", "chat", {"text": raw_text.strip()}, max(confidence, 0.5))
+
+    # ai.summarize / ai.explain_code with no text → treat as plain chat
+    if tool == "ai" and action in ("summarize", "explain_code") and not str(params.get("text", "")).strip():
+        return _remap("ai", "chat", {"text": raw_text.strip()}, max(confidence, 0.3))
+
+    return data
 
 
 def validate_intent(data: dict, raw_text: str = "") -> Intent:
@@ -161,6 +247,7 @@ def parse_intent(text: str) -> Intent:
                 confidence=0.1, raw_text=text,
             )
 
+        data = _normalize_data(data, text)
         intent = validate_intent(data, raw_text=text)
         logger.info("Parsed intent: %s", intent)
         return intent

@@ -58,42 +58,95 @@ GEMINI_MODEL = "gemini-2.0-flash"
 # ─── Memory ───────────────────────────────────────────────────────────
 MEMORY_MAX_ITEMS = 20           # keep last N interactions in context
 
-# ─── App Mappings (Linux) ─────────────────────────────────────────────
-# Map friendly names → executable commands
-APP_MAPPINGS = {
-    "chrome": "google-chrome",
-    "google chrome": "google-chrome",
-    "firefox": "firefox",
-    "brave": "brave-browser",
-    "vscode": "code",
-    "vs code": "code",
-    "visual studio code": "code",
-    "terminal": "gnome-terminal",
-    "file manager": "nautilus",
-    "files": "nautilus",
-    "nautilus": "nautilus",
-    "calculator": "gnome-calculator",
-    "settings": "gnome-control-center",
-    "text editor": "gedit",
-    "gedit": "gedit",
-    "spotify": "spotify",
-    "discord": "discord",
-    "slack": "slack",
-    "obs": "obs",
-    "vlc": "vlc",
-    "gimp": "gimp",
-    "libreoffice": "libreoffice",
-    "thunderbird": "thunderbird",
-}
+# ─── Platform Detection ───────────────────────────────────────────────
+import platform
+IS_WINDOWS = platform.system() == "Windows"
+
+# ─── App Mappings ─────────────────────────────────────────────────────
+# Map friendly names → executable commands (platform-specific).
+if IS_WINDOWS:
+    # Windows: launched via `cmd /c start <name>` (name resolved from PATH
+    # or the App Paths registry). "explorer" opens File Explorer.
+    APP_MAPPINGS = {
+        "chrome": "chrome",
+        "google chrome": "chrome",
+        "firefox": "firefox",
+        "brave": "brave",
+        "edge": "msedge",
+        "microsoft edge": "msedge",
+        "vscode": "code",
+        "vs code": "code",
+        "visual studio code": "code",
+        "terminal": "cmd",
+        "command prompt": "cmd",
+        "powershell": "powershell",
+        "file explorer": "explorer",
+        "file manager": "explorer",
+        "files": "explorer",
+        "explorer": "explorer",
+        "this pc": "explorer",
+        "calculator": "calc",
+        "settings": "ms-settings:",
+        "notepad": "notepad",
+        "text editor": "notepad",
+        "paint": "mspaint",
+        "word": "winword",
+        "excel": "excel",
+        "powerpoint": "powerpnt",
+        "outlook": "outlook",
+        "spotify": "spotify",
+        "discord": "discord",
+        "slack": "slack",
+        "vlc": "vlc",
+        "gimp": "gimp",
+        "obs": "obs",
+        "libreoffice": "libreoffice",
+        "thunderbird": "thunderbird",
+    }
+else:
+    APP_MAPPINGS = {
+        "chrome": "google-chrome",
+        "google chrome": "google-chrome",
+        "firefox": "firefox",
+        "brave": "brave-browser",
+        "vscode": "code",
+        "vs code": "code",
+        "visual studio code": "code",
+        "terminal": "gnome-terminal",
+        "file explorer": "nautilus",
+        "file manager": "nautilus",
+        "files": "nautilus",
+        "nautilus": "nautilus",
+        "calculator": "gnome-calculator",
+        "settings": "gnome-control-center",
+        "text editor": "gedit",
+        "gedit": "gedit",
+        "spotify": "spotify",
+        "discord": "discord",
+        "slack": "slack",
+        "obs": "obs",
+        "vlc": "vlc",
+        "gimp": "gimp",
+        "libreoffice": "libreoffice",
+        "thunderbird": "thunderbird",
+    }
 
 # ─── Terminal Safety ──────────────────────────────────────────────────
-ALLOWED_TERMINAL_COMMANDS = {
-    "ls", "pwd", "du", "df", "whoami", "uname",
-    "git status", "python --version", "python3 --version",
-    "pip --version", "pip3 --version",
-    "date", "uptime", "free", "hostname",
-    "cat /etc/os-release", "lsb_release -a",
-}
+if IS_WINDOWS:
+    ALLOWED_TERMINAL_COMMANDS = {
+        "dir", "pwd", "whoami", "ver", "date", "time", "hostname",
+        "echo", "cls", "cd", "where python", "where git",
+        "python --version", "pip --version",
+        "git status",
+    }
+else:
+    ALLOWED_TERMINAL_COMMANDS = {
+        "ls", "pwd", "du", "df", "whoami", "uname",
+        "git status", "python --version", "python3 --version",
+        "pip --version", "pip3 --version",
+        "date", "uptime", "free", "hostname",
+        "cat /etc/os-release", "lsb_release -a",
+    }
 
 BLOCKED_PATTERNS = [
     "rm ", "rm\t", "rmdir", "sudo", "mkfs", "dd ",
