@@ -50,7 +50,7 @@ TTS_VOLUME = 0.9                # 0.0 to 1.0
 
 # ─── AI Brain ─────────────────────────────────────────────────────────
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "rule_based")
-OLLAMA_MODEL = "phi3:mini"      # small model for Ollama
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL","phi3:mini")      # small model for Ollama
 OLLAMA_URL = "http://localhost:11434"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.0-flash"
