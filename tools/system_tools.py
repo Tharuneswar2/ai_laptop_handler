@@ -176,6 +176,29 @@ def lock_screen() -> ToolResult:
     return ToolResult(success=False, message="Could not lock screen.")
 
 
+def brightness_adjust(delta: int) -> ToolResult:
+    """Increase or decrease brightness by delta percentage."""
+    if os.name == "nt":
+        return ToolResult(success=False, message="Brightness adjustment not supported on Windows.")
+    try:
+        sign = "+" if delta > 0 else "-"
+        subprocess.run(["brightnessctl", "set", f"{abs(delta)}%{sign}"], capture_output=True, timeout=5)
+        return ToolResult(success=True, message=f"Adjusted brightness ({sign}{abs(delta)}%).")
+    except Exception:
+        return set_brightness(75 if delta > 0 else 30)
+
+
+def diagnose_performance() -> ToolResult:
+    """Check high RAM/CPU usage and return diagnosis."""
+    ram_res = ram_usage()
+    cpu_res = cpu_usage()
+    return ToolResult(
+        success=True,
+        message=f"Performance Diagnosis:\n• {ram_res.message}\n• {cpu_res.message}",
+        data={"ram": ram_res.data, "cpu": cpu_res.data}
+    )
+
+
 def handle(intent: Intent) -> ToolResult:
     """Route system tool actions."""
     action = intent.action
@@ -187,6 +210,9 @@ def handle(intent: Intent) -> ToolResult:
         "disk": lambda: disk_usage(),
         "volume": lambda: set_volume(params.get("level", 50)),
         "brightness": lambda: set_brightness(params.get("level", 50)),
+        "brightness_up": lambda: brightness_adjust(15),
+        "brightness_down": lambda: brightness_adjust(-15),
+        "diagnose_performance": lambda: diagnose_performance(),
         "screenshot": lambda: take_screenshot(),
         "lock_screen": lambda: lock_screen(),
     }

@@ -153,7 +153,7 @@ class Memory:
 
         # 7. "open my backend" / "open backend"
         if re.search(r"\bopen\s+(my\s+)?backend\b", lower):
-            return "open project backend"
+            return "open backend project"
 
         # 8. "open the last pdf" / "open newest pdf"
         if re.search(r"\bopen\s+(the\s+)?(last|newest|recent)\s+pdf\b", lower):

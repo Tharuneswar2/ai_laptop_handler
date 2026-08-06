@@ -32,21 +32,37 @@ class Intent:
     def __str__(self) -> str:
         return f"Intent(tool={self.tool}, action={self.action}, params={self.params}, confidence={self.confidence:.2f})"
 
+    @classmethod
+    def from_json(cls, json_str: str, raw_text: str = "") -> "Intent":
+        """Build an Intent instance from a JSON string."""
+        import json
+        try:
+            data = json.loads(json_str)
+            return cls(
+                tool=data.get("tool", "ai"),
+                action=data.get("action", "chat"),
+                params=data.get("params", {}),
+                confidence=data.get("confidence", 0.5),
+                raw_text=raw_text,
+            )
+        except Exception:
+            return cls(tool="ai", action="chat", params={"text": raw_text}, confidence=0.3, raw_text=raw_text)
+
 
 # ─── Valid Tool/Action Combinations ───────────────────────────────────
 
 VALID_ACTIONS = {
-    "file": {"create_file", "create_folder", "move", "rename", "delete", "search", "open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "move_screenshots"},
-    "app": {"open", "close", "list"},
-    "browser": {"open_url", "google_search", "youtube_search", "open_github", "open_doc", "watch_tutorial"},
-    "system": {"battery", "ram", "cpu", "disk", "volume", "brightness", "screenshot", "lock_screen"},
+    "file": {"create_file", "create_folder", "move", "rename", "delete", "search", "open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "archive", "unzip", "copy", "open_newest_pdf", "find_newest_pdf", "move_screenshots"},
+    "app": {"open", "close", "list", "open_folder", "open_terminal", "close_all"},
+    "browser": {"open_url", "google_search", "youtube_search", "open_github", "open_doc", "watch_tutorial", "bookmark", "close_tab"},
+    "system": {"battery", "ram", "cpu", "disk", "volume", "brightness", "brightness_up", "brightness_down", "diagnose_performance", "screenshot", "lock_screen"},
     "terminal": {"run"},
-    "ai": {"summarize", "explain_code", "chat"},
+    "ai": {"summarize", "explain_code", "chat", "chat_pdf", "debug_error"},
     "vscode": {"open_project", "open_recent", "create_project", "open_workspace", "open_file", "install_extension", "run_task", "run_terminal", "reopen_last_workspace"},
-    "developer": {"git_status", "git_commit", "git_push", "git_pull", "create_venv", "activate_venv", "pip_install", "run_python", "docker_ps", "docker_logs", "docker_compose_up"},
+    "developer": {"git_status", "git_commit", "git_push", "git_pull", "git_log", "create_venv", "activate_venv", "pip_install", "run_python", "run_backend", "docker_ps", "docker_logs", "docker_compose_up"},
     "project": {"find", "open_recent", "list", "list_projects", "scan", "scan_projects", "add", "remove"},
     "desktop": {"focus_app", "switch_app", "restore_session", "close_all", "minimize", "maximize", "get_state"},
-    "vision": {"ocr_screen", "analyze_screen", "detect_objects", "screen_understanding"},
+    "vision": {"ocr_screen", "analyze_screen", "detect_objects", "screen_understanding", "read_screen", "ocr"},
 }
 
 # Actions that require confirmation before execution

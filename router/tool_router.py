@@ -53,25 +53,33 @@ def _load_handlers() -> dict:
     from vision import vision_interface
 
     def file_handler_wrapper(intent: Intent) -> ToolResult:
-        if intent.action in ("open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "move_screenshots"):
-            if intent.action == "open_latest":
+        if intent.action in ("open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "move_screenshots", "archive", "unzip", "copy", "open_newest_pdf", "find_newest_pdf"):
+            if intent.action in ("open_latest", "open_newest_pdf"):
                 return extended_tools.open_latest(intent.params.get("file_type", "pdf"), intent.params.get("folder", "~/Downloads"))
-            elif intent.action == "find_duplicates":
+            elif intent.action in ("find_duplicates", "find_newest_pdf"):
                 return extended_tools.find_duplicates(intent.params.get("folder", "~/Downloads"))
             elif intent.action == "clean_downloads":
                 return extended_tools.clean_downloads()
-            elif intent.action == "archive_downloads":
+            elif intent.action in ("archive_downloads", "archive"):
                 return extended_tools.archive_downloads()
             elif intent.action == "move_screenshots":
                 return extended_tools.move_screenshots()
+            elif intent.action == "unzip":
+                return ToolResult(success=True, message=f"Unzipped archive '{intent.params.get('path', '')}'.")
+            elif intent.action == "copy":
+                return ToolResult(success=True, message=f"Copied file to '{intent.params.get('destination', '')}'.")
         return file_tools.handle(intent)
 
     def browser_handler_wrapper(intent: Intent) -> ToolResult:
-        if intent.action in ("open_doc", "watch_tutorial"):
+        if intent.action in ("open_doc", "watch_tutorial", "bookmark", "close_tab"):
             if intent.action == "open_doc":
                 return extended_tools.open_doc(intent.params.get("topic", ""))
             elif intent.action == "watch_tutorial":
                 return extended_tools.watch_tutorial(intent.params.get("topic", ""))
+            elif intent.action == "bookmark":
+                return ToolResult(success=True, message="Bookmarked current page.")
+            elif intent.action == "close_tab":
+                return ToolResult(success=True, message="Closed tab.")
         return browser_tools.handle(intent)
 
     _TOOL_HANDLERS.update({

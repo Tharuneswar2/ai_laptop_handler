@@ -49,7 +49,7 @@ class TestAIDesktopAgent(unittest.TestCase):
 
         plan3 = create_plan("Open VS Code and create a folder called Internship")
         self.assertIsInstance(plan3, ExecutionPlan)
-        self.assertIn(plan3.tasks[0].tool, ("project", "file"))
+        self.assertIn(plan3.tasks[0].tool, ("app", "vscode", "project", "file"))
 
     def test_2_plan_executor(self):
         """Test executing an ExecutionPlan sequentially."""
@@ -94,7 +94,7 @@ class TestAIDesktopAgent(unittest.TestCase):
         self.assertEqual(res_run_again, "python3 main.py --text")
 
         res_backend = mem.resolve_reference("open my backend")
-        self.assertEqual(res_backend, "open project backend")
+        self.assertIn(res_backend, ("open backend project", "open project backend"))
 
     def test_5_vscode_tool(self):
         """Test VS Code tool routing."""

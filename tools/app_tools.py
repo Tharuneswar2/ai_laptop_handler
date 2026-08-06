@@ -152,18 +152,60 @@ def list_running_apps() -> ToolResult:
         return ToolResult(success=False, message=f"Failed to list apps: {e}")
 
 
+def open_folder(path: str = "", name: str = "") -> ToolResult:
+    """Open a folder in the native file explorer."""
+    from pathlib import Path
+    target = Path(path).expanduser().resolve() if path else Path.home()
+    if not target.exists():
+        return ToolResult(success=False, message=f"Folder not found: {path}")
+
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["explorer", str(target)])
+        elif os.uname().sysname == "Darwin":
+            subprocess.Popen(["open", str(target)])
+        else:
+            subprocess.Popen(["xdg-open", str(target)])
+        return ToolResult(success=True, message=f"Opened '{name or target.name}' in File Explorer ({target}).")
+    except Exception as e:
+        return ToolResult(success=False, message=f"Failed to open folder: {e}")
+
+
+def open_terminal(path: str = "", name: str = "") -> ToolResult:
+    """Open a terminal / command prompt window at the given directory path."""
+    from pathlib import Path
+    target = Path(path).expanduser().resolve() if path else Path.home()
+
+    try:
+        if os.name == "nt":
+            subprocess.Popen(["cmd", "/c", "start", "cmd"], cwd=str(target))
+        elif os.uname().sysname == "Darwin":
+            subprocess.Popen(["open", "-a", "Terminal", str(target)])
+        else:
+            subprocess.Popen(["x-terminal-emulator"], cwd=str(target))
+        return ToolResult(success=True, message=f"Opened terminal in '{target}'.")
+    except Exception as e:
+        return ToolResult(success=False, message=f"Failed to open terminal: {e}")
+
+
 # ─── Handler ──────────────────────────────────────────────────────────
 
 def handle(intent: Intent) -> ToolResult:
     """Route app tool actions."""
     action = intent.action
     params = intent.params
+    name = params.get("name", "") or params.get("app_name", "")
+    path = params.get("path", "")
 
     if action == "open":
-        return open_app(params.get("app_name", ""))
+        return open_app(name)
     elif action == "close":
-        return close_app(params.get("app_name", ""))
+        return close_app(name)
     elif action == "list":
         return list_running_apps()
+    elif action in ("open_folder", "open_explorer"):
+        return open_folder(path=path, name=name)
+    elif action in ("open_terminal", "terminal"):
+        return open_terminal(path=path, name=name)
     else:
         return ToolResult(success=False, message=f"Unknown app action: {action}")

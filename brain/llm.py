@@ -129,31 +129,56 @@ class RuleBasedProvider(LLMProvider):
     # Patterns: list of (regex_pattern, tool, action, param_extractor)
     # ORDER MATTERS — more specific patterns must come before generic ones.
     PATTERNS = [
-        # Browser operations (before file/app to catch "search X on youtube" first)
-        (r"search (.+?) on youtube", "browser", "youtube_search", lambda m: {"query": m.group(1).strip()}),
+        # Terminal multi-command
+        (r"open terminal and run (.+)", "terminal", "run", lambda m: {"command": m.group(1).strip()}),
+
+        # 1. Browser operations
+        (r"search (.+?) (?:on|in) youtube", "browser", "youtube_search", lambda m: {"query": m.group(1).strip()}),
+        (r"open (.+?) (?:on|in) youtube", "browser", "youtube_search", lambda m: {"query": m.group(1).strip()}),
         (r"(?:open |go to )youtube", "browser", "youtube_search", lambda m: {"query": ""}),
         (r"(?:open |go to )github", "browser", "open_github", lambda m: {}),
+        (r"(?:open |go to )google", "browser", "open_url", lambda m: {"url": "https://google.com"}),
+        (r"open (.+?) documentation", "browser", "google_search", lambda m: {"query": f"{m.group(1).strip()} documentation"}),
+        (r"open the first result for (.+)", "browser", "google_search", lambda m: {"query": m.group(1).strip()}),
+        (r"bookmark (?:this )?page", "browser", "bookmark", lambda m: {}),
+        (r"close (?:this )?tab", "browser", "close_tab", lambda m: {}),
         (r"(?:open |go to )(?:the )?(?:url |website |site )(.+)", "browser", "open_url", lambda m: {"url": m.group(1).strip()}),
+        (r"(?:search for|find) (?:my |the )?(resume|notes|pdf|document)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
         (r"(?:google |web )?search (?:for )?(.+?)(?:\s+on\s+(?:google|the web))?$", "browser", "google_search", lambda m: {"query": m.group(1).strip()}),
 
-        # File operations
-        (r"create (?:a )?folder (?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(1).strip()}),
-        (r"make (?:a )?folder (?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(1).strip()}),
+        # 2. File & Folder operations
+        (r"create (?:a )?(?:new )?folder (?:in (.+) )?(?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(2).strip()}),
+        (r"make (?:a )?(?:new )?folder (?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(1).strip()}),
         (r"create (?:a )?file (?:called |named )?(.+)", "file", "create_file", lambda m: {"path": m.group(1).strip()}),
         (r"make (?:a )?file (?:called |named )?(.+)", "file", "create_file", lambda m: {"path": m.group(1).strip()}),
+        (r"rename (.+) to (.+)", "file", "rename", lambda m: {"source": m.group(1).strip(), "new_name": m.group(2).strip()}),
+        (r"move (.+) to (.+)", "file", "move", lambda m: {"source": m.group(1).strip(), "destination": m.group(2).strip()}),
         (r"delete (?:the )?(?:file |folder )?(.+)", "file", "delete", lambda m: {"path": m.group(1).strip()}),
         (r"remove (?:the )?(?:file |folder )?(.+)", "file", "delete", lambda m: {"path": m.group(1).strip()}),
-        (r"move (.+) to (.+)", "file", "move", lambda m: {"source": m.group(1).strip(), "destination": m.group(2).strip()}),
-        (r"rename (.+) to (.+)", "file", "rename", lambda m: {"source": m.group(1).strip(), "new_name": m.group(2).strip()}),
-        (r"(?:find|look for) (?:files? )?(?:called |named )?(.+)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
+        (r"clean downloads(?: folder)?", "file", "clean_downloads", lambda m: {}),
+        (r"archive (?:the )?(.+)(?: folder)?", "file", "archive", lambda m: {"path": m.group(1).strip()}),
+        (r"unzip (?:the )?(.+)", "file", "unzip", lambda m: {"path": m.group(1).strip()}),
+        (r"find duplicate images", "file", "find_duplicates", lambda m: {"type": "images"}),
+        (r"copy (?:this )?file to (.+)", "file", "copy", lambda m: {"destination": m.group(1).strip()}),
+        (r"open (?:the )?(?:newest|last|recent) pdf", "file", "open_newest_pdf", lambda m: {}),
+        (r"find (?:the )?(?:newest|last|recent) pdf", "file", "find_newest_pdf", lambda m: {}),
+        (r"(?:find|search for) (?:my |the )?(.+)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
 
-        # Project & Workspace operations (placed before generic app opening)
-        (r"open (.+?)\s+(?:project|repository|repo)\s*(?:in\s+(?:vscode|vs code|code))?$", "vscode", "open_project", lambda m: {"name": m.group(1).strip()}),
-        (r"open (.+?)\s+(?:in|on)\s+(?:vscode|vs code|code)$", "vscode", "open_project", lambda m: {"name": m.group(1).strip()}),
-        (r"open (?:my\s+)?(?:last|latest|recent)\s+project$", "vscode", "open_recent", lambda m: {}),
-        (r"continue (?:my\s+|yesterday's\s+)?(?:work|project|backend)", "vscode", "open_recent", lambda m: {}),
+        # 3. VS Code & Workspace Specific Operations
+        (r"open (?:the )?recent workspace", "vscode", "open_recent", lambda m: {}),
+        (r"reopen (?:the )?last workspace", "vscode", "reopen_last_workspace", lambda m: {}),
 
-        # App operations
+        # 4. App & Window Management Operations
+        (r"close chrome", "app", "close", lambda m: {"app_name": "chrome"}),
+        (r"close vs code", "app", "close", lambda m: {"app_name": "vscode"}),
+        (r"close all apps", "app", "close_all", lambda m: {}),
+        (r"minimize (?:the )?(?:current )?window", "desktop", "minimize", lambda m: {}),
+        (r"maximize (?:the )?(?:current )?window", "desktop", "maximize", lambda m: {}),
+        (r"switch to (.+)", "desktop", "focus_app", lambda m: {"app_name": m.group(1).strip()}),
+        (r"focus (.+)", "desktop", "focus_app", lambda m: {"app_name": m.group(1).strip()}),
+        (r"restore my session", "desktop", "restore_session", lambda m: {}),
+        (r"open terminal", "app", "open_terminal", lambda m: {}),
+        (r"open (?:file )?explorer", "app", "open_folder", lambda m: {}),
         (r"open (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
         (r"launch (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
         (r"start (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
@@ -161,26 +186,45 @@ class RuleBasedProvider(LLMProvider):
         (r"(?:list|show) (?:running |open )?apps", "app", "list", lambda m: {}),
         (r"what(?:'s| is) running", "app", "list", lambda m: {}),
 
-        # System operations
+        # 5. System Operations
         (r"(?:show |check |get )?battery(?: (?:status|level|info))?", "system", "battery", lambda m: {}),
         (r"(?:how much )?battery", "system", "battery", lambda m: {}),
         (r"(?:show |check |get )?(?:ram|memory)(?: (?:usage|status|info))?", "system", "ram", lambda m: {}),
         (r"(?:show |check |get )?cpu(?: (?:usage|status|info))?", "system", "cpu", lambda m: {}),
         (r"(?:show |check |get )?disk(?: (?:usage|space|status|info))?", "system", "disk", lambda m: {}),
-        (r"how much (?:disk )?space", "system", "disk", lambda m: {}),
+        (r"how much (?:disk )?space(?: is left)?", "system", "disk", lambda m: {}),
         (r"(?:take |capture )?(?:a )?screenshot", "system", "screenshot", lambda m: {}),
         (r"lock (?:the )?(?:screen|computer|laptop)", "system", "lock_screen", lambda m: {}),
         (r"(?:set |change )?volume (?:to )?(\d+)", "system", "volume", lambda m: {"level": int(m.group(1))}),
+        (r"increase brightness", "system", "brightness_up", lambda m: {}),
+        (r"decrease brightness", "system", "brightness_down", lambda m: {}),
         (r"(?:set |change )?brightness (?:to )?(\d+)", "system", "brightness", lambda m: {"level": int(m.group(1))}),
+        (r"show running processes", "app", "list", lambda m: {}),
+        (r"why is my laptop slow", "system", "diagnose_performance", lambda m: {}),
 
-        # Terminal operations
-        (r"(?:run |execute )(?:command )?(.+)", "terminal", "run", lambda m: {"command": m.group(1).strip()}),
-        (r"(?:show |get )?(?:current )?(?:directory|pwd)", "terminal", "run", lambda m: {"command": "pwd"}),
-        (r"list files", "terminal", "run", lambda m: {"command": "ls"}),
+        # 6. Terminal & Developer Workflow Operations
+        (r"open terminal and run (.+)", "terminal", "run", lambda m: {"command": m.group(1).strip()}),
+        (r"run (?:the )?backend(?: server)?", "developer", "run_backend", lambda m: {}),
+        (r"run git status", "developer", "git_status", lambda m: {}),
+        (r"show git log", "developer", "git_log", lambda m: {}),
+        (r"run (git|python|ls|pwd|df|du|whoami|uptime)", "terminal", "run", lambda m: {"command": m.group(1).strip()}),
+        (r"(?:run|execute) (.+)", "terminal", "run", lambda m: {"command": m.group(1).strip()}),
+        (r"install dependencies(?: for this project)?", "developer", "pip_install", lambda m: {}),
+        (r"create (?:a )?virtual environment", "developer", "create_venv", lambda m: {}),
+        (r"activate (?:the )?virtual environment", "developer", "activate_venv", lambda m: {}),
+        (r"pull (?:the )?latest changes", "developer", "git_pull", lambda m: {}),
+        (r"commit (?:the )?changes", "developer", "git_commit", lambda m: {}),
+        (r"push to github", "developer", "git_push", lambda m: {}),
 
-        # AI operations
-        (r"summarize (?:this )?(.+)", "ai", "summarize", lambda m: {"text": m.group(1).strip()}),
-        (r"explain (?:this )?(?:code )?(.+)", "ai", "explain_code", lambda m: {"text": m.group(1).strip()}),
+        # 7. AI Operations
+        (r"explain (?:this )?(?:code )?(.+)?", "ai", "explain_code", lambda m: {"text": m.group(1).strip() if m.group(1) else ""}),
+        (r"summarize (?:this )?(.+)?", "ai", "summarize", lambda m: {"text": m.group(1).strip() if m.group(1) else ""}),
+        (r"chat with this pdf", "ai", "chat_pdf", lambda m: {}),
+        (r"read (?:the )?screenshot", "vision", "read_screen", lambda m: {}),
+        (r"what is on my screen", "vision", "read_screen", lambda m: {}),
+        (r"extract text from (?:this )?image", "vision", "ocr", lambda m: {}),
+        (r"help me understand this error", "ai", "debug_error", lambda m: {}),
+        (r"suggest a fix for this bug", "ai", "debug_error", lambda m: {}),
     ]
 
     def generate(self, prompt: str) -> str:
