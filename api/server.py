@@ -127,7 +127,32 @@ def run_command(request: CommandRequest):
         text = clean_text
 
     _emit({"type": "processing", "text": text})
-    intent = parse_intent(text)
+    parsed = parse_intent(text)
+
+    from planner.task import ExecutionPlan
+    if isinstance(parsed, ExecutionPlan):
+        from planner.executor import execute_plan
+        result = execute_plan(parsed)
+        duration_ms = int((time.time() - start) * 1000)
+
+        _emit({
+            "type": "result",
+            "success": result.success,
+            "message": result.message,
+            "tool": "planner",
+            "action": "execute_plan",
+            "duration_ms": duration_ms,
+        })
+
+        return CommandResponse(
+            success=result.success,
+            tool="planner",
+            action="execute_plan",
+            message=result.message,
+            duration_ms=duration_ms,
+        )
+
+    intent = parsed
     result = route(intent)
     duration_ms = int((time.time() - start) * 1000)
 
@@ -256,7 +281,37 @@ async def websocket_endpoint(ws: WebSocket):
             start = time.time()
 
             _emit({"type": "processing", "text": text})
-            intent = parse_intent(text)
+            parsed = parse_intent(text)
+
+            from planner.task import ExecutionPlan
+            if isinstance(parsed, ExecutionPlan):
+                from planner.executor import execute_plan
+                result = execute_plan(parsed)
+                duration_ms = int((time.time() - start) * 1000)
+
+                _emit({
+                    "type": "result",
+                    "success": result.success,
+                    "message": result.message,
+                    "tool": "planner",
+                    "action": "execute_plan",
+                    "duration_ms": duration_ms,
+                })
+
+                await ws.send_json({
+                    "type": "result",
+                    "success": result.success,
+                    "tool": "planner",
+                    "action": "execute_plan",
+                    "message": result.message,
+                    "original_text": text,
+                    "duration_ms": duration_ms,
+                    "speak": f"Completed goal: {parsed.goal}",
+                })
+                wake_active = False
+                continue
+
+            intent = parsed
             result = route(intent)
             duration_ms = int((time.time() - start) * 1000)
 

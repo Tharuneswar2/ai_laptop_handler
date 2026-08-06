@@ -1,317 +1,156 @@
-# 🎤 AI Laptop Voice Handler (Nova)
+# 🤖 Intelligent AI Desktop Agent (Nova)
 
-A **modular, voice-controlled laptop assistant** that listens through your microphone, understands your intent, performs safe laptop actions, and speaks the response back in a natural voice.
-
-Built as a clean, extensible Python project — designed for laptops with limited GPU resources (~4 GB VRAM or CPU-only).
+A **goal-oriented, intelligent AI Desktop Agent** that goes beyond simple single-command execution. Nova features a multi-step reasoning **Planner**, **Project Manager**, **VS Code & Developer Workflow Tools**, **Desktop State Tracker**, **Context Reference Resolver**, and **Vision Interfaces**, while preserving full voice and web STT compatibility.
 
 ---
 
-## ✨ Features
+## 🌟 Architecture & Capabilities
 
-| Category | Capabilities |
-|----------|-------------|
-| **Voice I/O** | Speech-to-text (Whisper Tiny), text-to-speech (pyttsx3), wake word detection |
-| **File Ops** | Create, move, rename, delete (with confirmation), search files |
-| **App Control** | Open/close apps, list running applications |
-| **Browser** | Google search, YouTube search, open URLs, open GitHub |
-| **System Info** | Battery, RAM, CPU, disk usage, volume, brightness, screenshot, lock screen |
-| **Terminal** | Safe allowlist-only command execution (no dangerous commands) |
-| **AI Chat** | Summarize text, explain code, general Q&A (with Ollama/Gemini) |
-| **API** | REST API for programmatic access and future frontend integration |
+```mermaid
+flowchart TD
+    User[👤 User / Voice / Web / REST] --> WakeWord[🎤 Wake Word: Hey Nova]
+    WakeWord --> STT[Web Speech API / Speech Recognition]
+    STT --> Memory[🧠 Context & Reference Resolver]
+    Memory --> Parser[Intent & Goal Parser]
+    Parser -->|Multi-Step Goal| Planner[📋 Goal Planner]
+    Parser -->|Single Intent| Router[🔀 Tool Router]
+    
+    Planner --> Plan[ExecutionPlan: Atomic Task Sequence]
+    Plan --> Executor[⚙️ Plan Executor & Rollback Engine]
+    Executor --> Router
+    
+    subgraph Modular Tools & Orchestrators
+        Router --> ProjectMgr[📁 Project Manager: DB & Scanner]
+        Router --> VSCodeTool[💻 VS Code Automation Tool]
+        Router --> DevTool[⚡ Developer Tool: Git / Docker / Python]
+        Router --> DesktopMgr[🖥️ Desktop Window & App State Manager]
+        Router --> VisionTool[👁️ Vision & Screen Analysis Interface]
+        Router --> FileTools[📄 Safe File Tools]
+        Router --> AppTools[🚀 Application Tools]
+        Router --> BrowserTools[🌐 Browser Tools]
+        Router --> SystemTools[📊 System Tools]
+        Router --> TerminalTools[🔒 Terminal Tools]
+        Router --> AITools[💡 AI Chat & Code Explain]
+    end
+    
+    Router --> Observer[📡 Event Observer: Pet & UI]
+    Observer --> TTS[🔊 Voice & Web Audio Response]
+```
 
 ---
 
-## 🏗️ Architecture
+## ✨ Upgraded Features
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        main.py                              │
-│              (pipeline coordinator)                          │
-│                                                             │
-│  🎤 Microphone → [listener] → [intent_parser] → [router]  │
-│                                       ↓                     │
-│                              ┌────────┴────────┐            │
-│                              │   Tool Modules  │            │
-│                              │  file | app     │            │
-│                              │  browser | sys  │            │
-│                              │  terminal | ai  │            │
-│                              └────────┬────────┘            │
-│                                       ↓                     │
-│                              [speaker] → 🔊 Response        │
-│                                                             │
-│  📊 memory.py ←── logs everything ──→ data/history.db      │
-└─────────────────────────────────────────────────────────────┘
-```
+| Module | Key Capabilities |
+|--------|------------------|
+| **Goal Planner (`planner/`)** | Decomposes high-level goals (*"Start working"*, *"Setup FastAPI project"*, *"Prepare for coding"*) into structured `ExecutionPlans` with rollback capability and step-by-step event broadcasting. |
+| **Project Manager (`projects/`)** | Auto-discovers and tracks projects, detects frameworks (FastAPI, React, Django, Node, Flutter, Streamlit), tracks git origins and workspaces in `data/projects.db`. |
+| **VS Code Tool (`tools/vscode_tool.py`)** | Automated project opening, recent workspace reopening, file-at-line navigation, task triggering, extension installation, and template project generation. |
+| **Developer Tool (`tools/developer_tool.py`)** | Git workflows (`git status`, `git commit`, `git push`, `git pull`), Python virtualenv lifecycle, package management, script runner, and Docker container inspection/compose. |
+| **Desktop Manager (`desktop/`)** | Desktop state tracking (`opened_apps`, `focused_app`, `recent_apps`), workspace restoration, window focus switching, minimize/maximize. |
+| **Context Resolver (`brain/memory.py`)** | Anaphoric reference resolution (*"open it"*, *"close it"*, *"run it again"*, *"search it on Google"*, *"open my backend"*, *"open newest pdf"*). |
+| **Vision Interface (`vision/`)** | Extensible placeholders for OCR text extraction, visual layout analysis, screenshot understanding, and UI object detection. |
+| **Safety & Control** | Strict command allowlist, path sandboxing, deletion confirmation, shell safety, and execution logging in SQLite. |
 
-### Folder Structure
+---
+
+## 📁 Directory Structure
 
 ```
 ai-laptop-handler/
-├── main.py                 # Entry point (voice/text/API modes)
-├── config.py               # Centralized configuration
-├── requirements.txt        # Python dependencies
-├── .env.example            # Environment variable template
-├── voice/
-│   ├── listener.py         # Microphone → text (faster-whisper)
-│   ├── speaker.py          # Text → speech (pyttsx3)
-│   └── wakeword.py         # Wake word detection
+├── main.py                     # Central coordinator (supports --text, --web, --api, --pet)
+├── config.py                   # Global configuration
+├── requirements.txt            # Python dependencies
+├── test_agent_pipeline.py      # Comprehensive verification test suite
+├── planner/                    # 📋 Goal Decomposition & Execution Plan Engine
+│   ├── task.py                 # Task & ExecutionPlan dataclasses
+│   ├── planner.py              # Goal templates & LLM planning engine
+│   └── executor.py             # Sequential executor, event notification & rollback engine
+├── projects/                   # 📁 Project Manager & Framework Scanner
+│   └── project_manager.py      # SQLite project DB, scanner, & query engine
+├── desktop/                    # 🖥️ Desktop State & Window Manager
+│   └── desktop_manager.py      # App focus tracking, session restore, close all
+├── vision/                     # 👁️ Vision & Visual Interface
+│   └── vision_interface.py     # OCR, visual layout, and object detection placeholders
 ├── brain/
-│   ├── llm.py              # LLM provider abstraction
-│   ├── intent_parser.py    # Text → structured Intent
-│   └── memory.py           # Conversation history (SQLite)
+│   ├── llm.py                  # LLM provider abstraction (Offline / Ollama / Gemini)
+│   ├── intent_parser.py        # Intent & Goal detection with reference resolution
+│   └── memory.py               # Short-term, persistent SQLite history & context resolver
 ├── router/
-│   └── tool_router.py      # Intent → correct tool handler
-├── tools/
-│   ├── file_tools.py       # File/folder operations
-│   ├── app_tools.py        # Open/close applications
-│   ├── browser_tools.py    # Web search, open URLs
-│   ├── system_tools.py     # Battery, RAM, CPU, disk, etc.
-│   ├── terminal_tools.py   # Safe terminal commands
-│   └── ai_tools.py         # Summarize, explain, chat
-├── ui/
-│   └── terminal_ui.py      # Rich terminal interface
-├── api/
-│   └── server.py           # FastAPI REST server (+ pet observer hook)
-├── pet/                    # Desktop pet engine (Codex-compatible packs)
-│   ├── integration.py      # pet + web STT bridge (main.py --pet)
-│   ├── core/movement.py    # Idle wandering (run-animation movement)
-│   └── assets/pets/        # Installed pet packs
+│   └── tool_router.py          # Unified tool handler registry & router
+├── tools/                      # 🛠️ Specialized Tool Modules
+│   ├── vscode_tool.py          # VS Code project & workspace orchestration
+│   ├── developer_tool.py       # Git, Docker, Python virtualenvs
+│   ├── extended_tools.py       # File clean/archive, newest PDF, search docs, tutorials
+│   ├── file_tools.py           # Safe file & directory operations
+│   ├── app_tools.py            # App launcher and process control
+│   ├── browser_tools.py        # Web search & URL navigation
+│   ├── system_tools.py         # Hardware stats, volume, brightness, screenshots
+│   ├── terminal_tools.py       # Cross-platform safe terminal execution
+│   └── ai_tools.py             # Code explanation & general Q&A
+├── pet/                        # 🐾 Desktop Pet Engine & Event Observer
 └── data/
-    ├── history.db           # Command history (auto-created)
-    └── logs/                # Log files
+    ├── history.db              # Command history database
+    └── projects.db             # Tracked projects database
 ```
-
----
-
-## 🚀 Installation
-
-### Prerequisites
-
-- **Python 3.10+**
-- **Linux** (primary target, most features work on macOS/Windows too)
-- **Microphone** (for voice mode)
-- **Speakers** (for text-to-speech)
-
-### Setup
-
-```bash
-# 1. Clone or navigate to the project
-cd ai-laptop-handler
-
-# 2. Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. (Optional) Copy and configure environment variables
-cp .env.example .env
-
-# 5. (Optional) Install system tools for full functionality
-sudo apt install scrot amixer brightnessctl  # screenshot, volume, brightness
-```
-
-> **Note:** The Whisper Tiny model (~75 MB) will download automatically on the first run.
 
 ---
 
 ## 🎮 How to Run
 
-### Text Mode (recommended for first run)
+### 1. Verification Test Suite
 
-No microphone needed — type commands directly:
-
-```bash
-python main.py --text
-```
-
-### Voice Mode (full experience)
-
-Listen for wake word "Hey Nova", then speak your command:
+Run the full automated test suite to verify planning, project scanning, context resolution, and tool routing:
 
 ```bash
-python main.py
+python3 test_agent_pipeline.py
 ```
 
-### Voice Mode (no wake word)
-
-Start listening immediately without a wake word:
+### 2. Multi-Step Goal Execution in Text Mode
 
 ```bash
-python main.py --no-wake
+python3 main.py --text
 ```
 
-### API Server
+Try goals like:
+- `Start working`
+- `Setup FastAPI project`
+- `Open VS Code and create a folder called Internship`
+- `Clean Downloads folder`
+- `Open my backend`
+- `run it again`
 
-Start the REST API for programmatic access:
+### 3. Web & Desktop Pet Mode 🐾
 
 ```bash
-python main.py --api
-# Server runs on http://127.0.0.1:8000
-# Docs at http://127.0.0.1:8000/docs
+python3 main.py --pet
 ```
-
-### Pet Mode (desktop pet + web STT) 🐾
-
-Show an animated desktop pet on screen while the browser-based STT runs
-in the background. The pet reacts to your commands in real time —
-listening → thinking → working → happy/error — with speech bubbles, and
-wanders along the bottom of your screen when idle (using its built-in
-run animations):
-
-```bash
-# Start with the default pet
-python main.py --pet
-
-# Start with a specific pet pack
-python main.py --pet aiko
-python main.py --pet doraemon
-```
-
-Then open `http://127.0.0.1:8000` in Chrome/Edge and speak — "Hey Nova,
-open Chrome" — the pet listens, thinks and celebrates right on your desktop.
-
-**Installed pets** (drop any Codex-compatible pack folder with
-`pet.json` + `spritesheet.webp` into `pet/assets/pets/` to add more):
-
-| Pet | Pack id |
-|-----|---------|
-| Aiko | `aiko` |
-| Becky | `becky` |
-| Doraemon | `doraemon` |
-| Little Black Mage | `little-mage` |
-| Nova Bot | `robot--nova` |
-| Nova Cat | `cat--nova` |
-| Nova Fox | `fox--nova` |
-| Nova Panda | `panda--nova` |
+Open `http://127.0.0.1:8000` in Google Chrome / Edge and speak commands or goals directly via Browser STT. The desktop pet will reflect execution state events (*listening* → *thinking* → *working* → *completed*) in real time.
 
 ---
 
-## 🗣️ Example Voice Commands
+## 🗣️ High-Level Goal Examples
 
-| Command | What happens |
-|---------|-------------|
-| "Hey Nova, open Chrome" | Opens Google Chrome |
-| "Hey Nova, open VS Code" | Opens Visual Studio Code |
-| "Hey Nova, create a folder called projects" | Creates `~/projects` |
-| "Hey Nova, search FastAPI tutorial on YouTube" | Searches YouTube |
-| "Hey Nova, how much disk space is left?" | Shows disk usage stats |
-| "Hey Nova, check battery" | Shows battery percentage |
-| "Hey Nova, take a screenshot" | Captures screen to ~/Pictures |
-| "Hey Nova, list running apps" | Shows open applications |
-| "Hey Nova, lock the screen" | Locks the screen |
-| "Hey Nova, set volume to 50" | Sets volume to 50% |
+| Goal / Command | Actions Executed by Planner |
+|----------------|-----------------------------|
+| `"Start working"` | Finds recent project → Opens VS Code workspace → Checks `git status` → Checks RAM usage |
+| `"Setup FastAPI project"` | Creates folder `~/Projects/fastapi_backend` → Creates venv → Opens VS Code → Creates `main.py` → Installs `fastapi uvicorn` |
+| `"Open VS Code and create a folder called Internship"` | Creates folder `~/Projects/Internship` → Opens VS Code in folder |
+| `"Clean Downloads folder"` | Sorts files in `~/Downloads` into `Images`, `Documents`, `Code`, `Archives` |
+| `"Open my backend"` | Resolves tag/name "backend" in Project Database → Opens project in VS Code |
+| `"open it"` | Resolves "it" to `last_project` or `last_app` and launches it |
+| `"run it again"` | Re-executes `last_command` |
 
 ---
 
-## 🧠 AI Brain Configuration
+## 🔒 Safety Gating & Isolation
 
-The intent parser uses a **rule-based engine** by default (fully offline). For smarter AI features:
-
-### Option 1: Ollama (local LLM, recommended)
-
-```bash
-# Install Ollama: https://ollama.com
-ollama pull phi3:mini
-# Edit .env: LLM_PROVIDER=ollama
-```
-
-### Option 2: Google Gemini (cloud API)
-
-```bash
-# Get a key: https://aistudio.google.com
-# Edit .env:
-#   LLM_PROVIDER=gemini
-#   GEMINI_API_KEY=your_key_here
-```
-
----
-
-## 🔒 Safety Design
-
-This project takes safety seriously:
-
-| Protection | Details |
-|-----------|---------|
-| **No unrestricted shell** | Terminal uses a strict command allowlist |
-| **No silent deletion** | Delete operations require explicit confirmation |
-| **Path sandboxing** | File operations restricted to home directory |
-| **No dangerous commands** | `rm`, `sudo`, `chmod`, pipes, redirects — all blocked |
-| **Subprocess safety** | All commands use `shell=False` |
-| **Action logging** | Every command is logged to `data/history.db` |
-
-### Allowed Terminal Commands
-
-```
-ls, pwd, du, df, whoami, uname, date, uptime, free,
-hostname, git status, python --version, pip --version
-```
-
----
-
-## 🧩 Extending the Project
-
-### Adding a new tool
-
-1. Create `tools/my_tool.py` with a `handle(intent: Intent) -> ToolResult` function
-2. Add the tool name to `VALID_ACTIONS` in `brain/intent_parser.py`
-3. Register it in `router/tool_router.py`'s `_load_handlers()`
-4. Add matching patterns in `brain/llm.py`'s `RuleBasedProvider`
-
-### Adding a new app mapping
-
-Edit `config.py` → `APP_MAPPINGS`:
-
-```python
-APP_MAPPINGS = {
-    "my_app": "my-app-command",
-    ...
-}
-```
-
-### Swapping the TTS engine
-
-Replace the implementation in `voice/speaker.py`. The interface (`speak(text)`) stays the same.
-
----
-
-## 📊 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/status` | Health check |
-| `POST` | `/command` | Execute a text command |
-| `GET` | `/history` | Get command history |
-
-### Example API call
-
-```bash
-curl -X POST http://127.0.0.1:8000/command \
-  -H "Content-Type: application/json" \
-  -d '{"text": "check battery"}'
-```
-
----
-
-## 🔮 Future Improvements
-
-- [ ] Piper TTS for more natural voice
-- [ ] OpenWakeWord for better wake word detection
-- [ ] Web frontend dashboard
-- [ ] Plugin system for community tools
-- [ ] Multi-language support
-- [ ] Context-aware follow-up commands
-- [ ] Scheduled tasks / reminders
-- [ ] Clipboard integration
-- [ ] Music player control
+- **Dangerous Actions**: File deletion and app closing require explicit confirmation.
+- **Allowed Shell Commands**: Terminal commands are strictly gated by cross-platform command translation (`dir`/`ls`, `git status`, `python --version`, etc.) using safe `subprocess` invocation (`shell=False`).
+- **Path Isolation**: File actions are restricted to the user's home directory tree (`~`).
 
 ---
 
 ## 📝 License
 
-MIT License — free for personal and educational use.
-
----
-
-Built with ❤️ as an internship-ready AI project.
+MIT License — Built with ❤️ as an internship-ready AI project.

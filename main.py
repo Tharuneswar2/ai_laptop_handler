@@ -71,39 +71,67 @@ logger = logging.getLogger(__name__)
 
 def process_command(text: str, memory: Memory, speak_response: bool = True) -> None:
     """
-    Process a single user command through the full pipeline.
+    Process a single user command or multi-step goal through the full pipeline.
 
     Args:
-        text: The user's command text.
+        text: The user's command or goal text.
         memory: Memory instance for logging.
         speak_response: Whether to speak the response aloud.
     """
     start = time.time()
 
-    # 1. Parse intent
-    intent = parse_intent(text)
+    # 1. Parse intent or execution plan
+    parsed = parse_intent(text)
+
+    # 2. Handle ExecutionPlan (multi-step goal)
+    from planner.task import ExecutionPlan
+    if isinstance(parsed, ExecutionPlan):
+        console.print(f"  [bold cyan]📋 Execution Plan generated for goal:[/] [white]{parsed.goal}[/]")
+        for i, t in enumerate(parsed.tasks):
+            console.print(f"    [dim]{i+1}. [{t.tool}.{t.action}][/] {t.params}")
+
+        from planner.executor import execute_plan
+        result = execute_plan(parsed)
+        duration_ms = int((time.time() - start) * 1000)
+
+        print_result(result.message, result.success)
+
+        if speak_response:
+            try:
+                from voice.speaker import speak
+                speak(f"Completed goal: {parsed.goal}")
+            except Exception as e:
+                logger.warning("TTS failed: %s", e)
+
+        memory.add(
+            user_text=text,
+            intent="planner.execute_plan",
+            result=result.message,
+            status="ok" if result.success else "error",
+            duration_ms=duration_ms,
+        )
+        print_divider()
+        return
+
+    # 3. Handle single Intent
+    intent = parsed
     print_intent(intent.tool, intent.action)
 
-    # 2. Check for confirmation-required actions
     if requires_confirmation(intent):
-        console.print("  [bold yellow]⚠ This action requires confirmation.[/]")
+        console.print("  [bold yellow]⚠️  This action requires confirmation.[/]")
 
-    # 3. Route to tool and execute
     result = route(intent)
     duration_ms = int((time.time() - start) * 1000)
 
-    # 4. Display result
     print_result(result.message, result.success)
 
-    # 5. Speak response
     if speak_response:
         try:
             from voice.speaker import speak
-            speak(result.message[:200])  # limit length for TTS
+            speak(result.message[:200])
         except Exception as e:
             logger.warning("TTS failed: %s", e)
 
-    # 6. Log to memory
     memory.add(
         user_text=text,
         intent=f"{intent.tool}.{intent.action}",

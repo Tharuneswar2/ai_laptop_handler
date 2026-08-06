@@ -47,14 +47,45 @@ def _load_handlers() -> dict:
         return _TOOL_HANDLERS
 
     from tools import file_tools, app_tools, browser_tools, system_tools, terminal_tools, ai_tools
+    from tools import vscode_tool, developer_tool, extended_tools
+    from projects import project_manager
+    from desktop import desktop_manager
+    from vision import vision_interface
+
+    def file_handler_wrapper(intent: Intent) -> ToolResult:
+        if intent.action in ("open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "move_screenshots"):
+            if intent.action == "open_latest":
+                return extended_tools.open_latest(intent.params.get("file_type", "pdf"), intent.params.get("folder", "~/Downloads"))
+            elif intent.action == "find_duplicates":
+                return extended_tools.find_duplicates(intent.params.get("folder", "~/Downloads"))
+            elif intent.action == "clean_downloads":
+                return extended_tools.clean_downloads()
+            elif intent.action == "archive_downloads":
+                return extended_tools.archive_downloads()
+            elif intent.action == "move_screenshots":
+                return extended_tools.move_screenshots()
+        return file_tools.handle(intent)
+
+    def browser_handler_wrapper(intent: Intent) -> ToolResult:
+        if intent.action in ("open_doc", "watch_tutorial"):
+            if intent.action == "open_doc":
+                return extended_tools.open_doc(intent.params.get("topic", ""))
+            elif intent.action == "watch_tutorial":
+                return extended_tools.watch_tutorial(intent.params.get("topic", ""))
+        return browser_tools.handle(intent)
 
     _TOOL_HANDLERS.update({
-        "file": file_tools.handle,
+        "file": file_handler_wrapper,
         "app": app_tools.handle,
-        "browser": browser_tools.handle,
+        "browser": browser_handler_wrapper,
         "system": system_tools.handle,
         "terminal": terminal_tools.handle,
         "ai": ai_tools.handle,
+        "vscode": vscode_tool.handle,
+        "developer": developer_tool.handle,
+        "project": project_manager.handle,
+        "desktop": desktop_manager.handle,
+        "vision": vision_interface.handle,
     })
 
     logger.info("Loaded %d tool handlers: %s", len(_TOOL_HANDLERS), list(_TOOL_HANDLERS.keys()))

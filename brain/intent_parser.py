@@ -36,12 +36,17 @@ class Intent:
 # ─── Valid Tool/Action Combinations ───────────────────────────────────
 
 VALID_ACTIONS = {
-    "file": {"create_file", "create_folder", "move", "rename", "delete", "search"},
+    "file": {"create_file", "create_folder", "move", "rename", "delete", "search", "open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "move_screenshots"},
     "app": {"open", "close", "list"},
-    "browser": {"open_url", "google_search", "youtube_search", "open_github"},
+    "browser": {"open_url", "google_search", "youtube_search", "open_github", "open_doc", "watch_tutorial"},
     "system": {"battery", "ram", "cpu", "disk", "volume", "brightness", "screenshot", "lock_screen"},
     "terminal": {"run"},
     "ai": {"summarize", "explain_code", "chat"},
+    "vscode": {"open_project", "open_recent", "create_project", "open_workspace", "open_file", "install_extension", "run_task", "run_terminal", "reopen_last_workspace"},
+    "developer": {"git_status", "git_commit", "git_push", "git_pull", "create_venv", "activate_venv", "pip_install", "run_python", "docker_ps", "docker_logs", "docker_compose_up"},
+    "project": {"find", "open_recent", "list", "list_projects", "scan", "scan_projects", "add", "remove"},
+    "desktop": {"focus_app", "switch_app", "restore_session", "close_all", "minimize", "maximize", "get_state"},
+    "vision": {"ocr_screen", "analyze_screen", "detect_objects", "screen_understanding"},
 }
 
 # Actions that require confirmation before execution
@@ -217,38 +222,74 @@ def requires_confirmation(intent: Intent) -> bool:
     return (intent.tool, intent.action) in DANGEROUS_ACTIONS
 
 
-def parse_intent(text: str) -> Intent:
+def is_goal_request(text: str) -> bool:
+    """Check if the text represents a high-level goal requiring multi-step planning."""
+    lower = text.lower().strip()
+    goal_patterns = [
+        r"\b(start working|prepare for coding|start coding|coding mode)\b",
+        r"\b(continue (my |yesterday's )?work|continue (my |the )?project)\b",
+        r"\b(setup|create|build|init)\s+(fastapi|python|react|node)\b",
+        r"\b(run|start|launch)\s+(my\s+)?backend\b",
+        r"\b(push (latest )?changes|deploy (backend|project))\b",
+        r"\b(build docker|docker compose)\b",
+        r"\b(clean|archive)\s+downloads\b",
+        r"\bopen (vs code|vscode)\s+(and|then)\s+create\b",
+        r"\b(open|watch)\s+.*(documentation|docs|tutorial)\b",
+    ]
+    for pattern in goal_patterns:
+        if re.search(pattern, lower):
+            return True
+    return False
+
+
+def parse_intent(text: str):
     """
-    Full pipeline: take user text → LLM → validated Intent.
+    Full pipeline: take user text → resolve context → parse Intent or ExecutionPlan.
 
     Args:
         text: Raw user text (e.g., "create a folder called projects").
 
     Returns:
-        Validated Intent ready for routing.
+        Intent or ExecutionPlan ready for execution.
     """
     from brain.llm import get_provider
+    from brain.memory import Memory
 
     if not text or not text.strip():
         return Intent(tool="ai", action="chat", params={"text": ""}, confidence=0.0, raw_text=text)
 
+    # 1. Anaphoric pronoun resolution ("open it", "run it again", "close it")
+    try:
+        mem = Memory()
+        resolved_text = mem.resolve_reference(text)
+    except Exception:
+        resolved_text = text
+
+    # 2. Goal detection for multi-step planning
+    if is_goal_request(resolved_text):
+        from planner.planner import create_plan
+        plan = create_plan(resolved_text)
+        if not plan.is_empty:
+            logger.info("Parsed request '%s' as multi-step ExecutionPlan (%d tasks)", text, len(plan.tasks))
+            return plan
+
     provider = get_provider()
-    logger.info("Parsing intent with %s: '%s'", provider.name, text[:80])
+    logger.info("Parsing intent with %s: '%s' (resolved: '%s')", provider.name, text[:80], resolved_text[:80])
 
     try:
-        raw_json = provider.generate(text)
+        raw_json = provider.generate(resolved_text)
         data = parse_json_safely(raw_json)
 
         if not data:
             logger.warning("Provider returned unparseable output.")
             return Intent(
                 tool="ai", action="chat",
-                params={"text": text},
-                confidence=0.1, raw_text=text,
+                params={"text": resolved_text},
+                confidence=0.1, raw_text=resolved_text,
             )
 
-        data = _normalize_data(data, text)
-        intent = validate_intent(data, raw_text=text)
+        data = _normalize_data(data, resolved_text)
+        intent = validate_intent(data, raw_text=resolved_text)
         logger.info("Parsed intent: %s", intent)
         return intent
 
@@ -256,6 +297,6 @@ def parse_intent(text: str) -> Intent:
         logger.error("Intent parsing failed: %s", e)
         return Intent(
             tool="ai", action="chat",
-            params={"text": text},
-            confidence=0.0, raw_text=text,
+            params={"text": resolved_text},
+            confidence=0.0, raw_text=resolved_text,
         )
