@@ -19,23 +19,9 @@ fastapi>=0.100.0
 uvicorn[standard]>=0.23.0
 websockets>=12.0
 
-# Desktop Pet Engine (pet/ — Codex-compatible pet packs)
-PySide6>=6.5.0
+# Desktop Pet Engine / Pillow asset utilities
 Pillow>=10.0.0
 
 # Environment variables
 python-dotenv>=1.0.0
 
-# ─── Optional: Local Whisper STT (only if STT_PROVIDER=whisper_local) ───
-# Uncomment below if you want local speech-to-text instead of browser STT.
-# Requires ~75 MB model download + CUDA or CPU-only mode.
-#
-# faster-whisper>=1.0.0
-# sounddevice>=0.4.6
-# scipy>=1.11.0
-#
-# For CUDA/GPU acceleration (optional):
-# nvidia-cublas-cu12>=12.0.0
-# nvidia-cudnn-cu12>=9.0.0
-# nvidia-cuda-nvrtc-cu12>=12.0.0
-# torch

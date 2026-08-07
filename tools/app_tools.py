@@ -31,12 +31,14 @@ def _process_name(command: str) -> str:
     return base
 
 
+import shutil
+
 def open_app(app_name: str) -> ToolResult:
     """
     Open an application by its friendly name.
 
     Args:
-        app_name: Friendly name like "chrome", "vs code", "file explorer".
+        app_name: Friendly name like "chrome", "vs code", "file explorer", "start menu".
     """
     name = (app_name or "").lower().strip()
     if not name:
@@ -50,8 +52,28 @@ def open_app(app_name: str) -> ToolResult:
     command = config.APP_MAPPINGS.get(name, name)
     logger.info("Opening app '%s' (command: '%s')", name, command)
 
+    # Handle Start Menu explicitly on Windows
+    if command == "start_menu" or name in ("start menu", "start"):
+        if os.name == "nt":
+            subprocess.Popen([
+                "powershell", "-NoProfile", "-Command",
+                "$wshell = New-Object -ComObject WScript.Shell; $wshell.SendKeys('^{ESC}')"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return ToolResult(success=True, message="Opened Start Menu.")
+        return ToolResult(success=False, message="Start Menu toggle is only supported on Windows.")
+
     try:
         if os.name == "nt":
+            # If not in predefined mapping and not a URI scheme, check if command exists
+            is_mapped = name in config.APP_MAPPINGS
+            is_uri = ":" in command
+            if not is_mapped and not is_uri:
+                if not shutil.which(command):
+                    return ToolResult(
+                        success=False,
+                        message=f"App '{app_name}' not found. Is it installed?",
+                    )
+
             # `start "" <name>` resolves registered apps from PATH / App Paths
             subprocess.Popen(
                 ["cmd", "/c", "start", "", command],

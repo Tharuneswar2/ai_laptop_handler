@@ -16,7 +16,7 @@ import time
 from typing import Any, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -35,9 +35,9 @@ app = FastAPI(
 )
 
 # ─── Command Observers ────────────────────────────────────────────────
-# External components (e.g. the desktop pet) can subscribe to assistant
-# events without the server knowing about them.  Observers are called with
-# plain dicts from the uvicorn thread, so they must be thread-safe.
+# External components can subscribe to assistant events without the server
+# knowing about them. Observers are called with plain dicts from the uvicorn
+# thread, so they must be thread-safe.
 
 _observers: list[Callable[[dict[str, Any]], None]] = []
 
@@ -94,6 +94,12 @@ def serve_ui():
     if index_path.exists():
         return FileResponse(str(index_path), media_type="text/html")
     return {"error": "Web UI not found. Ensure ui/web/index.html exists."}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Return 204 No Content for favicon requests to avoid 404 logs."""
+    return Response(status_code=204)
 
 
 # ─── REST Endpoints (unchanged from v1) ──────────────────────────────
@@ -374,7 +380,7 @@ def start_server():
     logger.info("Starting API server on %s:%d", config.API_HOST, config.API_PORT)
     logger.info("Web UI: http://%s:%d", config.API_HOST, config.API_PORT)
     logger.info("API docs: http://%s:%d/docs", config.API_HOST, config.API_PORT)
-    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT, log_level="info")
+    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT, log_level="warning")
 
 
 if __name__ == "__main__":

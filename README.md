@@ -8,8 +8,7 @@ A **goal-oriented, intelligent AI Desktop Agent** that goes beyond simple single
 
 ```mermaid
 flowchart TD
-    User[👤 User / Voice / Web / REST] --> WakeWord[🎤 Wake Word: Hey Nova]
-    WakeWord --> STT[Web Speech API / Speech Recognition]
+    User[👤 User / Voice / Web / REST] --> STT[Web Speech API / Speech Recognition]
     STT --> Memory[🧠 Context & Reference Resolver]
     Memory --> Parser[Intent & Goal Parser]
     Parser -->|Multi-Step Goal| Planner[📋 Goal Planner]
@@ -33,7 +32,7 @@ flowchart TD
         Router --> AITools[💡 AI Chat & Code Explain]
     end
     
-    Router --> Observer[📡 Event Observer: Pet & UI]
+    Router --> Observer[📡 Event Observer: Web UI]
     Observer --> TTS[🔊 Voice & Web Audio Response]
 ```
 
@@ -58,7 +57,7 @@ flowchart TD
 
 ```
 ai-laptop-handler/
-├── main.py                     # Central coordinator (supports --text, --web, --api, --pet)
+├── main.py                     # Central coordinator (defaults to Web mode)
 ├── config.py                   # Global configuration
 ├── requirements.txt            # Python dependencies
 ├── test_agent_pipeline.py      # Comprehensive verification test suite
@@ -88,7 +87,8 @@ ai-laptop-handler/
 │   ├── system_tools.py         # Hardware stats, volume, brightness, screenshots
 │   ├── terminal_tools.py       # Cross-platform safe terminal execution
 │   └── ai_tools.py             # Code explanation & general Q&A
-├── pet/                        # 🐾 Desktop Pet Engine & Event Observer
+├── ui/
+│   └── web/                    # 🌐 Web UI & Browser STT (Auto-listening interface)
 └── data/
     ├── history.db              # Command history database
     └── projects.db             # Tracked projects database
@@ -98,13 +98,12 @@ ai-laptop-handler/
 
 ## 🎮 How to Run
 
-### 1. Verification Test Suite
-
-Run the full automated test suite to verify planning, project scanning, context resolution, and tool routing:
+### 1. Web Mode (Default) 🌐
 
 ```bash
-python3 test_agent_pipeline.py
+python3 main.py
 ```
+Open `http://127.0.0.1:8000` in Google Chrome or Microsoft Edge. Speech recognition is active in the background automatically upon page load.
 
 ### 2. Multi-Step Goal Execution in Text Mode
 
@@ -120,12 +119,13 @@ Try goals like:
 - `Open my backend`
 - `run it again`
 
-### 3. Web & Desktop Pet Mode 🐾
+### 3. Verification Test Suite
+
+Run the full automated test suite:
 
 ```bash
-python3 main.py --pet
+python3 test_agent_pipeline.py
 ```
-Open `http://127.0.0.1:8000` in Google Chrome / Edge and speak commands or goals directly via Browser STT. The desktop pet will reflect execution state events (*listening* → *thinking* → *working* → *completed*) in real time.
 
 ---
 

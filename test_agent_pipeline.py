@@ -131,6 +131,18 @@ class TestAIDesktopAgent(unittest.TestCase):
         intent_safe = Intent(tool="system", action="ram", params={})
         self.assertFalse(requires_confirmation(intent_safe))
 
+    def test_9_placeholder_sanitization(self):
+        """Test that LLM placeholders like <app_name> are stripped from params."""
+        from brain.intent_parser import _normalize_data
+        data = {
+            "tool": "app",
+            "action": "open",
+            "params": {"app_name": "<user's preferred application>"},
+            "confidence": 0.9,
+        }
+        normalized = _normalize_data(data, "open my application")
+        self.assertEqual(normalized["params"]["app_name"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

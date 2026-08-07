@@ -129,26 +129,33 @@
             }
         };
 
+        let restartTimer = null;
+
         recognition.onerror = (event) => {
-            console.error("Speech recognition error:", event.error);
+            if (event.error === "aborted") {
+                // Aborted error occurs when recognition is stopped/started rapidly or without user interaction
+                console.log("Speech recognition paused/aborted.");
+                isListening = false;
+                setState(State.IDLE);
+                return;
+            }
 
             switch (event.error) {
                 case "not-allowed":
                     showError(
-                        "Microphone access was denied. Please allow microphone access in your browser settings and reload the page."
+                        "Microphone access was denied or requires user permission. Please click the microphone button to start."
                     );
                     stopListening();
                     break;
                 case "no-speech":
-                    // Normal — just means silence, no need to alert
+                    // Normal — just silence
                     break;
                 case "audio-capture":
                     showError("No microphone detected. Please connect a microphone and try again.");
                     stopListening();
                     break;
                 case "network":
-                    // Browser speech API network issue — just restart
-                    console.warn("Network error in speech recognition, restarting...");
+                    console.warn("Network error in speech recognition, will retry...");
                     break;
                 default:
                     console.warn("Speech recognition error:", event.error);
@@ -156,18 +163,20 @@
         };
 
         recognition.onend = () => {
-            // Auto-restart if we should still be listening
+            // Auto-restart with throttle delay if we should still be listening
             if (isListening) {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    console.warn("Failed to restart recognition:", e);
-                    setTimeout(() => {
-                        if (isListening) {
-                            try { recognition.start(); } catch (e2) { /* give up */ }
+                if (restartTimer) clearTimeout(restartTimer);
+                restartTimer = setTimeout(() => {
+                    if (isListening) {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            console.warn("Failed to restart recognition:", e.message);
+                            isListening = false;
+                            setState(State.IDLE);
                         }
-                    }, 500);
-                }
+                    }
+                }, 1000);
             }
         };
     }
@@ -501,8 +510,14 @@
         initSpeechRecognition();
         connectWebSocket();
 
-        setState(State.IDLE);
-        console.log("Nova Voice Assistant — ready.");
+        // Attempt background start on load (active if mic permission previously granted)
+        try {
+            startListening();
+            console.log("Nova Voice Assistant — active and listening in background.");
+        } catch (e) {
+            console.log("Waiting for user permission / microphone tap.");
+            stopListening();
+        }
     }
 
     // Start when DOM is ready

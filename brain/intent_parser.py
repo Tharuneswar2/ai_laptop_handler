@@ -120,6 +120,7 @@ def _normalize_data(data: dict, raw_text: str) -> dict:
     Fixes observed failures such as:
       - "open vs code"      → terminal.run with a hallucinated command
       - "open file explorer" → system.open_file_explorer (invalid action)
+      - LLM returning placeholder text like "<user's preferred application>"
 
     Args:
         data: Raw intent dict from the LLM provider.
@@ -137,6 +138,21 @@ def _normalize_data(data: dict, raw_text: str) -> dict:
     if not isinstance(params, dict):
         params = {}
     confidence = float(data.get("confidence", 0.5))
+
+    # ── Sanitize LLM placeholder text from params ──────────────────
+    # LLMs sometimes return angle-bracket placeholders like
+    # "<user's preferred application>" or "<filename>" as actual values.
+    # Strip these out so tools see empty strings and can handle gracefully.
+    _PLACEHOLDER_RE = re.compile(r"^<[^>]+>$")
+    sanitized_params = {}
+    for k, v in params.items():
+        if isinstance(v, str) and _PLACEHOLDER_RE.match(v.strip()):
+            logger.warning("Stripped LLM placeholder from param '%s': %s", k, v)
+            sanitized_params[k] = ""
+        else:
+            sanitized_params[k] = v
+    params = sanitized_params
+    data["params"] = params
 
     def _remap(new_tool: str, new_action: str, new_params: dict, conf: float) -> dict:
         return {"tool": new_tool, "action": new_action, "params": new_params, "confidence": conf}

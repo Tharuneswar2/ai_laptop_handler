@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """
-main.py — AI Laptop Voice Handler entry point.
+main.py — AI Laptop Handler entry point.
 
 Coordinates the full pipeline:
   listen → transcribe → understand → route → execute → speak
 
 Modes:
-  python main.py              # Full voice mode (mic + speaker, needs whisper_local)
+  python main.py              # Web UI mode (default, browser STT via WebSocket)
   python main.py --text       # Text-only mode (keyboard input)
-  python main.py --web        # Web UI mode (browser STT via WebSocket)
   python main.py --api        # Start API server only (REST endpoints)
-  python main.py --no-wake    # Voice mode, skip wake word
-  python main.py --pet        # Desktop pet + web STT in the background
 """
 
 import argparse
@@ -23,6 +20,13 @@ from pathlib import Path
 
 # Ensure project root is in the Python path
 sys.path.insert(0, str(Path(__file__).parent))
+
+# Ensure UTF-8 output encoding on Windows console
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import config
 from brain.intent_parser import parse_intent, requires_confirmation
@@ -45,23 +49,37 @@ signal.signal(signal.SIGINT, shutdown)
 # ─── Logging Setup ───────────────────────────────────────────────────
 
 def setup_logging() -> None:
-    """Configure logging to both file and console."""
+    """Configure logging — full detail to file, minimal output to console."""
     log_file = config.LOG_DIR / "nova.log"
 
-    logging.basicConfig(
-        level=getattr(logging, config.LOG_LEVEL),
-        format=config.LOG_FORMAT,
+    # Root logger captures everything at INFO level
+    root = logging.getLogger()
+    root.setLevel(getattr(logging, config.LOG_LEVEL))
+
+    formatter = logging.Formatter(
+        fmt=config.LOG_FORMAT,
         datefmt=config.LOG_DATE_FORMAT,
-        handlers=[
-            logging.FileHandler(log_file, encoding="utf-8"),
-            logging.StreamHandler(sys.stdout),
-        ],
     )
-    # Suppress noisy libraries
-    logging.getLogger("faster_whisper").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+    # File handler: all INFO and above (for debugging)
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    # Console handler: only WARNING and above (keep terminal clean)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(formatter)
+
+    root.addHandler(file_handler)
+    root.addHandler(console_handler)
+
+    # Suppress noisy libraries entirely
+    logging.getLogger("urllib3").setLevel(logging.ERROR)
+    logging.getLogger("httpx").setLevel(logging.ERROR)
+    logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
+    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn").setLevel(logging.WARNING)
 
 
 logger = logging.getLogger(__name__)
@@ -186,58 +204,6 @@ def run_text_mode(memory: Memory) -> None:
             break
 
 
-# ─── Voice Mode Loop (whisper_local) ─────────────────────────────────
-
-def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
-    """Run the assistant in full voice mode (local mic + speaker)."""
-    print_banner()
-    print_help()
-
-    if use_wake_word:
-        print_status(f"Listening for wake word: {config.WAKE_WORDS}", "bold green")
-    else:
-        print_status("Listening (wake word disabled)...", "bold green")
-
-    print_divider()
-
-    from voice.listener import listen_smart
-    from voice.wakeword import detect_wake_word, check_text_for_wake_word
-    from voice.speaker import speak
-
-    while True:
-        try:
-            if use_wake_word:
-                print_status("Waiting for wake word...", "bold cyan")
-                if not detect_wake_word(timeout=None):
-                    continue
-                speak("Yes?")
-                print_status("Wake word detected! Listening...", "bold green")
-
-            print_status("Listening...", "bold green")
-            text = listen_smart()
-
-            if not text:
-                print_status("Didn't catch that. Try again.", "dim yellow")
-                continue
-
-            _, clean_text = check_text_for_wake_word(text)
-            if clean_text:
-                text = clean_text
-
-            print_heard(text)
-            process_command(text, memory, speak_response=True)
-
-        except KeyboardInterrupt:
-            console.print("\n")
-            print_status("Interrupted. Goodbye! 👋", "bold magenta")
-            speak("Goodbye!")
-            break
-        except Exception as e:
-            print_error(str(e))
-            logger.error("Voice loop error: %s", e, exc_info=True)
-            time.sleep(1)
-
-
 # ─── Web Mode ────────────────────────────────────────────────────────
 
 def run_web_mode() -> None:
@@ -266,54 +232,31 @@ def run_web_mode() -> None:
 def main():
     """Parse arguments and start the assistant."""
     parser = argparse.ArgumentParser(
-        description="AI Laptop Voice Handler (Nova) — voice-controlled laptop assistant",
+        description="AI Laptop Handler (Nova) — voice-controlled laptop assistant",
     )
-    parser.add_argument("--text", action="store_true", help="Run in text-only mode (no microphone)")
-    parser.add_argument("--web", action="store_true", help="Run web UI with browser-based STT (recommended)")
-    parser.add_argument("--no-wake", action="store_true", help="Skip wake word detection (voice mode only)")
+    parser.add_argument("--text", action="store_true", help="Run in text-only mode (keyboard input)")
+    parser.add_argument("--web", action="store_true", help="Run web UI with browser-based STT (default)")
     parser.add_argument("--api", action="store_true", help="Start API server only (REST endpoints)")
-    parser.add_argument(
-        "--pet",
-        nargs="?",
-        const="__default__",
-        metavar="PET",
-        help="Run the desktop pet with web STT in the background (optionally: pet pack id/slug)",
-    )
     args = parser.parse_args()
 
     setup_logging()
     logger.info("Starting AI Laptop Handler (Nova)...")
     logger.info("STT Provider: %s", config.STT_PROVIDER)
 
-    # ─── Desktop pet + web STT mode ────────────────────────────────────
-    if args.pet:
-        from pet.integration import run_pet_mode
-
-        slug = None if args.pet == "__default__" else args.pet
-        print_banner()
-        console.print("  [bold green]🐾 Pet Mode — Desktop pet + web STT[/]")
-        console.print()
-        console.print(f"  [bold white]Open your browser:[/] [cyan]http://{config.API_HOST}:{config.API_PORT}[/]")
-        console.print("  [dim]Talk to the pet via browser speech recognition.[/]")
-        print_divider()
-        return run_pet_mode(slug)
-
-    if args.web:
-        run_web_mode()
-        return
-
     if args.api:
         from api.server import start_server
         start_server()
         return
 
-    memory = Memory()
-
     if args.text:
+        memory = Memory()
         run_text_mode(memory)
-    else:
-        run_voice_mode(memory, use_wake_word=not args.no_wake)
+        return
+
+    # Default mode is Web Mode
+    run_web_mode()
 
 
 if __name__ == "__main__":
     main()
+

@@ -24,24 +24,12 @@ LOG_DIR.mkdir(exist_ok=True)
 
 # ─── STT Provider ─────────────────────────────────────────────────────
 # "browser"        — Web Speech API via browser (default, no GPU needed)
-# "whisper_local"  — faster-whisper running locally (needs CUDA or CPU)
-# "cloud_whisper"  — future: cloud-based Whisper API
 STT_PROVIDER = os.getenv("STT_PROVIDER", "browser")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en-US")  # BCP-47 language tag
 
 # ─── Wake Word ────────────────────────────────────────────────────────
-WAKE_WORDS = ["hey nova", "hey assistant"]
-WAKE_LISTEN_DURATION = 2        # seconds per wake-word check window
+WAKE_WORDS = ["hey nova", "hey assistant", "innova", "hey innova"]
 WAKE_WORD_ENABLED = True        # set False to skip wake word entirely
-
-# ─── Voice Settings (whisper_local mode only) ─────────────────────────
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
-WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
-WHISPER_COMPUTE_TYPE = "int8"   # int8 for CPU, float16 for GPU
-LISTEN_DURATION = 5             # default recording length (seconds)
-LISTEN_MAX_DURATION = 15        # max recording for silence-based stop
-SILENCE_THRESHOLD = 500         # amplitude threshold for silence
-SAMPLE_RATE = 16000             # Whisper expects 16 kHz
 
 # ─── TTS Settings ─────────────────────────────────────────────────────
 TTS_ENGINE = "pyttsx3"          # pyttsx3 | piper (future)
@@ -85,6 +73,8 @@ if IS_WINDOWS:
         "files": "explorer",
         "explorer": "explorer",
         "this pc": "explorer",
+        "start menu": "start_menu",
+        "start": "start_menu",
         "calculator": "calc",
         "settings": "ms-settings:",
         "notepad": "notepad",

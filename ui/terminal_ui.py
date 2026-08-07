@@ -14,7 +14,14 @@ from rich.live import Live
 from rich.layout import Layout
 from rich.columns import Columns
 
-logger = logging.getLogger(__name__)
+import sys
+
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 console = Console()
 
