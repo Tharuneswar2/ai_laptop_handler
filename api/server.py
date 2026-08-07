@@ -152,14 +152,16 @@ async def websocket_endpoint(ws: WebSocket):
     logger.info("WebSocket client connected.")
 
     # Per-connection state
-    wake_active = False  # Has the user said the wake word?
+    # The browser microphone button activates listening by default. Wake-word
+    # mode can be enabled through BROWSER_REQUIRE_WAKE_WORD.
+    wake_active = not config.BROWSER_REQUIRE_WAKE_WORD
     memory = Memory()
 
     try:
         # Send initial state
         await ws.send_json({
             "type": "waiting_wake",
-            "message": 'Say "Hey Nova" to activate.',
+            "message": 'Tap to activate.',
         })
 
         while True:
@@ -185,10 +187,11 @@ async def websocket_endpoint(ws: WebSocket):
             # Check for wake word
             has_wake, remaining = check_text_for_wake_word(text)
 
-            if has_wake:
+            if config.BROWSER_REQUIRE_WAKE_WORD and has_wake:
+                prompt_msg = "Yes Boss, tell me Boss." if wake_active else "Yes Boss, waiting for your instruction."
                 wake_active = True
                 logger.info("Wake word detected in: '%s'", text)
-                await ws.send_json({"type": "wake_detected"})
+                await ws.send_json({"type": "wake_detected", "speak": prompt_msg})
 
                 # If there's a command after the wake word, process it immediately
                 if remaining.strip():
@@ -198,14 +201,35 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({
                         "type": "info",
                         "message": "Listening for your command...",
+                        "speak": prompt_msg,
                     })
                     continue
 
-            elif not wake_active:
+            elif config.BROWSER_REQUIRE_WAKE_WORD and not wake_active:
                 # No wake word yet — keep waiting
                 await ws.send_json({
                     "type": "waiting_wake",
-                    "message": 'Say "Hey Nova" to activate.',
+                    "message": 'Tap to activate.',
+                })
+                continue
+
+            # Check for explicit sleep/exit commands
+            SLEEP_COMMANDS = {"sleep", "exit", "goodbye", "stop listening", "stop", "turn off", "go to sleep"}
+            if text.strip().lower() in SLEEP_COMMANDS:
+                wake_active = False
+                await ws.send_json({
+                    "type": "result",
+                    "success": True,
+                    "tool": "system",
+                    "action": "sleep",
+                    "message": "Okay Boss, going to sleep.",
+                    "original_text": text,
+                    "duration_ms": 0,
+                    "speak": "Okay Boss, going to sleep.",
+                })
+                await ws.send_json({
+                    "type": "waiting_wake",
+                    "message": 'Tap to activate.',
                 })
                 continue
 
@@ -234,7 +258,7 @@ async def websocket_endpoint(ws: WebSocket):
                 "message": result.message,
                 "original_text": text,
                 "duration_ms": duration_ms,
-                "speak": result.message[:200] if result.success else "",
+                "speak": result.message[:200] if result.message else ("Done Boss." if result.success else "Failed Boss."),
             })
 
             logger.info(
@@ -242,9 +266,6 @@ async def websocket_endpoint(ws: WebSocket):
                 text[:40], intent.tool, intent.action,
                 "ok" if result.success else "error", duration_ms,
             )
-
-            # Reset wake state — require wake word again for next command
-            wake_active = False
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected.")

@@ -19,6 +19,54 @@ from abc import ABC, abstractmethod
 logger = logging.getLogger(__name__)
 
 
+# Voice aliases are normalized before routing so every supported Windows app
+# has one stable app_name and never needs an LLM decision.
+WINDOWS_APP_ALIASES = {
+    "vs code": "vs code", "vscode": "vs code", "visual studio code": "vs code",
+    "chrome": "chrome", "google chrome": "chrome",
+    "edge": "edge", "microsoft edge": "edge", "ms edge": "edge",
+    "file explorer": "file explorer", "explorer": "file explorer",
+    "files": "file explorer", "windows explorer": "file explorer", "file manager": "file explorer",
+    "microsoft store": "microsoft store", "store": "microsoft store", "windows store": "microsoft store",
+    "notepad": "notepad", "text editor": "notepad",
+    "calculator": "calculator", "calc": "calculator",
+    "paint": "paint", "mspaint": "paint",
+    "command prompt": "command prompt", "cmd": "command prompt",
+    "powershell": "powershell",
+    "task manager": "task manager", "taskmgr": "task manager",
+    "settings": "settings", "windows settings": "settings",
+    "control panel": "control panel",
+    "spotify": "spotify", "discord": "discord", "vlc": "vlc", "vlc media player": "vlc",
+    "word": "word", "microsoft word": "word", "ms word": "word",
+    "excel": "excel", "microsoft excel": "excel", "ms excel": "excel",
+    "powerpoint": "powerpoint", "microsoft powerpoint": "powerpoint", "ms powerpoint": "powerpoint", "ppt": "powerpoint",
+    "photoshop": "photoshop", "intellij": "intellij", "android studio": "android studio",
+    "blender": "blender", "obs": "obs",
+}
+
+_APP_NAMES_PATTERN = "|".join(re.escape(k) for k in sorted(WINDOWS_APP_ALIASES.keys(), key=len, reverse=True))
+
+
+def _canonical_app_params(match: re.Match) -> dict:
+    """Return the canonical app name captured by a supported-app rule."""
+    try:
+        raw_name = match.group(1).lower().strip()
+    except (IndexError, AttributeError):
+        return {}
+    canonical = WINDOWS_APP_ALIASES.get(raw_name, raw_name)
+    return {"app_name": canonical}
+
+
+def _strip_markdown_json(raw: str) -> str:
+    """Strip markdown code block wrappers from JSON string."""
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = [l for l in lines if not l.strip().startswith("```")]
+        cleaned = "\n".join(lines).strip()
+    return cleaned
+
+
 # ─── Base Provider ────────────────────────────────────────────────────
 
 class LLMProvider(ABC):
@@ -55,28 +103,29 @@ class RuleBasedProvider(LLMProvider):
         (r"(?:open |go to )youtube", "browser", "youtube_search", lambda m: {"query": ""}),
         (r"(?:open |go to )github", "browser", "open_github", lambda m: {}),
         (r"(?:open |go to )(?:the )?(?:url |website |site )(.+)", "browser", "open_url", lambda m: {"url": m.group(1).strip()}),
-        (r"(?:google |web )?search (?:for )?(.+?)(?:\s+on\s+(?:google|the web))?$", "browser", "google_search", lambda m: {"query": m.group(1).strip()}),
+        (r"^(?:google|web search|search)(?: for)? (.+?)(?:\s+on\s+(?:google|the web))?$", "browser", "google_search", lambda m: {"query": m.group(1).strip()}),
 
         # File operations
         (r"create (?:a )?folder (?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(1).strip()}),
         (r"make (?:a )?folder (?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(1).strip()}),
         (r"create (?:a )?file (?:called |named )?(.+)", "file", "create_file", lambda m: {"path": m.group(1).strip()}),
         (r"make (?:a )?file (?:called |named )?(.+)", "file", "create_file", lambda m: {"path": m.group(1).strip()}),
-        (r"delete (?:the )?(?:file |folder )?(.+)", "file", "delete", lambda m: {"path": m.group(1).strip()}),
-        (r"remove (?:the )?(?:file |folder )?(.+)", "file", "delete", lambda m: {"path": m.group(1).strip()}),
-        (r"move (.+) to (.+)", "file", "move", lambda m: {"source": m.group(1).strip(), "destination": m.group(2).strip()}),
-        (r"rename (.+) to (.+)", "file", "rename", lambda m: {"source": m.group(1).strip(), "new_name": m.group(2).strip()}),
-        (r"(?:find|look for) (?:files? )?(?:called |named )?(.+)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
+        (r"(?:delete|remove) (?:the )?(?:file |folder )?(?:called |named )?(.+)", "file", "delete", lambda m: {"path": m.group(1).strip()}),
+        (r"move (?:the )?(?:file |folder )?(.+) to (.+)", "file", "move", lambda m: {"source": m.group(1).strip(), "destination": m.group(2).strip()}),
+        (r"rename (?:the )?(?:file |folder )?(.+) to (.+)", "file", "rename", lambda m: {"source": m.group(1).strip(), "new_name": m.group(2).strip()}),
+        (r"(?:find|look for) (?:files? |folders? )?(?:called |named )?(.+)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
 
-        # App operations
-        (r"open (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
-        (r"launch (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
-        (r"start (.+)", "app", "open", lambda m: {"app_name": m.group(1).strip()}),
-        (r"close (.+)", "app", "close", lambda m: {"app_name": m.group(1).strip()}),
+        # Canonical Windows application names. Evaluated before generic app/file/terminal patterns.
+        (r"(?:open|launch|start|execute) (?:the )?(" + _APP_NAMES_PATTERN + r")$", "app", "open", _canonical_app_params),
+        (r"^(" + _APP_NAMES_PATTERN + r")$", "app", "open", _canonical_app_params),
+        (r"(?:open|launch|start|execute) (?:the )?(.+)", "app", "open", lambda m: {"app_name": WINDOWS_APP_ALIASES.get(m.group(1).lower().strip(), m.group(1).strip())}),
+        (r"(?:close|exit|quit|stop) (?:the )?(" + _APP_NAMES_PATTERN + r")$", "app", "close", _canonical_app_params),
+        (r"(?:close|exit|quit|stop) (?:the )?(.+)", "app", "close", lambda m: {"app_name": m.group(1).strip()}),
         (r"(?:list|show) (?:running |open )?apps", "app", "list", lambda m: {}),
         (r"what(?:'s| is) running", "app", "list", lambda m: {}),
 
         # System operations
+        (r"^(?:sleep|exit|goodbye|stop listening|stop|go to sleep|turn off)$", "system", "sleep", lambda m: {}),
         (r"(?:show |check |get )?battery(?: (?:status|level|info))?", "system", "battery", lambda m: {}),
         (r"(?:how much )?battery", "system", "battery", lambda m: {}),
         (r"(?:show |check |get )?(?:ram|memory)(?: (?:usage|status|info))?", "system", "ram", lambda m: {}),
@@ -85,8 +134,8 @@ class RuleBasedProvider(LLMProvider):
         (r"how much (?:disk )?space", "system", "disk", lambda m: {}),
         (r"(?:take |capture )?(?:a )?screenshot", "system", "screenshot", lambda m: {}),
         (r"lock (?:the )?(?:screen|computer|laptop)", "system", "lock_screen", lambda m: {}),
-        (r"(?:set |change )?volume (?:to )?(\d+)", "system", "volume", lambda m: {"level": int(m.group(1))}),
-        (r"(?:set |change )?brightness (?:to )?(\d+)", "system", "brightness", lambda m: {"level": int(m.group(1))}),
+        (r"(?:set |change )?volume (?:to )?(\d+)%?", "system", "volume", lambda m: {"level": int(m.group(1))}),
+        (r"(?:set |change )?brightness (?:to )?(\d+)%?", "system", "brightness", lambda m: {"level": int(m.group(1))}),
 
         # Terminal operations
         (r"(?:run |execute )(?:command )?(.+)", "terminal", "run", lambda m: {"command": m.group(1).strip()}),
@@ -101,6 +150,7 @@ class RuleBasedProvider(LLMProvider):
     def generate(self, prompt: str) -> str:
         """Match user text against patterns and return structured JSON intent."""
         text = prompt.lower().strip()
+        text = re.sub(r"[.!?]+$", "", text).strip()
 
         for pattern, tool, action, extractor in self.PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -114,7 +164,7 @@ class RuleBasedProvider(LLMProvider):
                     "tool": tool,
                     "action": action,
                     "params": params,
-                    "confidence": 0.85,
+                    "confidence": 1.0,
                 }
                 logger.info("Rule matched: %s → %s.%s", text, tool, action)
                 return json.dumps(intent)
@@ -138,22 +188,43 @@ class RuleBasedProvider(LLMProvider):
 class OllamaProvider(LLMProvider):
     """Connect to a local Ollama server for intent extraction."""
 
-    SYSTEM_PROMPT = """You are an intent extraction engine for a voice-controlled laptop assistant.
-Given a user command, extract the intent as a JSON object with these fields:
-- "tool": one of "file", "app", "browser", "system", "terminal", "ai"
-- "action": the specific action to perform
-- "params": a dict of parameters for the action
-- "confidence": float between 0 and 1
+    SYSTEM_PROMPT = """You extract one structured intent for a Windows voice-controlled laptop assistant.
+Return ONLY one valid JSON object with exactly these keys: tool, action, params, confidence.
 
-Valid actions per tool:
+Allowed tools/actions:
 - file: create_file, create_folder, move, rename, delete, search
 - app: open, close, list
 - browser: open_url, google_search, youtube_search, open_github
-- system: battery, ram, cpu, disk, volume, brightness, screenshot, lock_screen
+- system: battery, ram, cpu, disk, volume, brightness, screenshot, lock_screen, sleep
 - terminal: run
 - ai: summarize, explain_code, chat
 
-Respond ONLY with valid JSON. No extra text."""
+Strict classification rules:
+1. Opening any application (e.g. "open file explorer", "open vs code", "open chrome", "open explorer", "open files", "open calculator", "open photoshop") is ALWAYS tool="app", action="open". NEVER convert an app command into create_folder, create_file, or any file action.
+2. Canonical app names: "file explorer", "vs code", "chrome", "edge", "calculator", "notepad", "command prompt", "powershell", "task manager", "settings", "control panel", "microsoft store", "spotify", "discord", "vlc", "word", "excel", "powerpoint".
+3. A file action requires an explicit file verb like "create folder", "make folder", "create file", "delete", "move", "rename", "find file".
+4. NEVER invent Linux paths (/home/...), Windows paths (C:\\...), user directories, filenames, or parameters not spoken by the user. If no path is given, use only the spoken name.
+5. For conversational or unclear requests, return tool="ai", action="chat", params={"text":"<original command>"}.
+
+Examples:
+User: open file explorer
+{"tool":"app","action":"open","params":{"app_name":"file explorer"},"confidence":1.0}
+User: open explorer
+{"tool":"app","action":"open","params":{"app_name":"file explorer"},"confidence":1.0}
+User: open files
+{"tool":"app","action":"open","params":{"app_name":"file explorer"},"confidence":1.0}
+User: open vs code
+{"tool":"app","action":"open","params":{"app_name":"vs code"},"confidence":1.0}
+User: open chrome
+{"tool":"app","action":"open","params":{"app_name":"chrome"},"confidence":1.0}
+User: create folder projects
+{"tool":"file","action":"create_folder","params":{"path":"projects"},"confidence":1.0}
+User: create file test.txt
+{"tool":"file","action":"create_file","params":{"path":"test.txt"},"confidence":1.0}
+User: search python on youtube
+{"tool":"browser","action":"youtube_search","params":{"query":"python"},"confidence":1.0}
+
+Do not include Markdown, explanations, or additional keys."""
 
     def __init__(self):
         import config
@@ -181,7 +252,8 @@ Respond ONLY with valid JSON. No extra text."""
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 result = json.loads(resp.read().decode())
-                return result.get("response", "{}")
+                resp_text = result.get("response", "{}")
+                return _strip_markdown_json(resp_text)
         except Exception as e:
             logger.error("Ollama request failed: %s", e)
             return json.dumps({"tool": "ai", "action": "chat", "params": {"text": prompt}, "confidence": 0.2})
@@ -226,14 +298,19 @@ class GeminiProvider(LLMProvider):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 result = json.loads(resp.read().decode())
-                text = result["candidates"][0]["content"]["parts"][0]["text"]
-                return text
+                candidates = result.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        text = parts[0].get("text", "{}")
+                        return _strip_markdown_json(text)
+                return json.dumps({"tool": "ai", "action": "chat", "params": {"text": prompt}, "confidence": 0.2})
         except Exception as e:
             logger.error("Gemini API request failed: %s", e)
             return json.dumps({"tool": "ai", "action": "chat", "params": {"text": prompt}, "confidence": 0.2})
 
     def is_available(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key and str(self.api_key).strip())
 
 
 # ─── Provider Factory ────────────────────────────────────────────────
@@ -242,7 +319,7 @@ def get_provider() -> LLMProvider:
     """
     Auto-detect and return the best available LLM provider.
 
-    Priority: config setting → Ollama (if running) → rule-based fallback.
+    Priority: config setting → Ollama (if running) → Gemini (if API key set) → rule-based fallback.
     """
     import config
 
@@ -262,12 +339,16 @@ def get_provider() -> LLMProvider:
             return provider
         logger.warning("Ollama server not available, falling back.")
 
-    # Auto-detect: try Ollama even if not explicitly configured
+    # Auto-detect: try Ollama, then Gemini, then rule-based fallback
     if provider_name == "auto":
         ollama = OllamaProvider()
         if ollama.is_available():
             logger.info("Auto-detected Ollama server.")
             return ollama
+        gemini = GeminiProvider()
+        if gemini.is_available():
+            logger.info("Auto-detected Gemini API key.")
+            return gemini
 
     # Default: rule-based (always works)
     logger.info("Using rule-based intent provider (fully offline).")

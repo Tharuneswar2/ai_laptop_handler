@@ -160,14 +160,14 @@ def run_text_mode(memory: Memory) -> None:
 # ─── Voice Mode Loop (whisper_local) ─────────────────────────────────
 
 def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
-    """Run the assistant in full voice mode (local mic + speaker)."""
+    """Run the assistant in full voice mode with continuous conversation."""
     print_banner()
     print_help()
 
     if use_wake_word:
-        print_status(f"Listening for wake word: {config.WAKE_WORDS}", "bold green")
+        print_status(f"Wake word active: {config.WAKE_WORDS}", "bold green")
     else:
-        print_status("Listening (wake word disabled)...", "bold green")
+        print_status("Continuous listening (wake word disabled)...", "bold green")
 
     print_divider()
 
@@ -175,25 +175,47 @@ def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
     from voice.wakeword import detect_wake_word, check_text_for_wake_word
     from voice.speaker import speak
 
+    SLEEP_COMMANDS = {"sleep", "exit", "goodbye", "stop listening", "stop", "turn off", "go to sleep"}
+    in_conversation = not use_wake_word
+
     while True:
         try:
-            if use_wake_word:
+            # STATE 1: Waiting for Wake Word
+            if use_wake_word and not in_conversation:
                 print_status("Waiting for wake word...", "bold cyan")
                 if not detect_wake_word(timeout=None):
                     continue
-                speak("Yes?")
-                print_status("Wake word detected! Listening...", "bold green")
-
-            print_status("Listening...", "bold green")
-            text = listen_smart()
-
-            if not text:
-                print_status("Didn't catch that. Try again.", "dim yellow")
+                speak("Yes Boss, waiting for your instruction.")
+                print_status("Wake word detected! Entering continuous conversation mode...", "bold green")
+                in_conversation = True
                 continue
 
-            _, clean_text = check_text_for_wake_word(text)
-            if clean_text:
-                text = clean_text
+            # STATE 2: Continuous Conversation Mode
+            print_status("Listening for instruction...", "bold green")
+            text = listen_smart()
+
+            if not text or not text.strip():
+                continue
+
+            cmd_lower = text.strip().lower()
+
+            # Check if user said wake word again in continuous mode
+            has_wake, remaining = check_text_for_wake_word(cmd_lower)
+            if has_wake:
+                if not remaining.strip():
+                    speak("Yes Boss, tell me Boss.")
+                    print_status("Wake word spoken during conversation mode.", "bold cyan")
+                    continue
+                else:
+                    text = remaining.strip()
+                    cmd_lower = text.lower()
+
+            # Check for sleep/exit commands
+            if cmd_lower in SLEEP_COMMANDS:
+                speak("Okay Boss, going to sleep.")
+                print_status("Going to sleep...", "bold yellow")
+                in_conversation = False
+                continue
 
             print_heard(text)
             process_command(text, memory, speak_response=True)
@@ -206,7 +228,7 @@ def run_voice_mode(memory: Memory, use_wake_word: bool = True) -> None:
         except Exception as e:
             print_error(str(e))
             logger.error("Voice loop error: %s", e, exc_info=True)
-            time.sleep(1)
+            time.sleep(0.5)
 
 
 # ─── Web Mode ────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ and returns a validated Intent dataclass ready for routing.
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ VALID_ACTIONS = {
     "file": {"create_file", "create_folder", "move", "rename", "delete", "search"},
     "app": {"open", "close", "list"},
     "browser": {"open_url", "google_search", "youtube_search", "open_github"},
-    "system": {"battery", "ram", "cpu", "disk", "volume", "brightness", "screenshot", "lock_screen"},
+    "system": {"battery", "ram", "cpu", "disk", "volume", "brightness", "screenshot", "lock_screen", "sleep"},
     "terminal": {"run"},
     "ai": {"summarize", "explain_code", "chat"},
 }
@@ -99,6 +100,19 @@ def validate_intent(data: dict, raw_text: str = "") -> Intent:
     if not isinstance(params, dict):
         params = {}
 
+    # Do not allow a model to fabricate a Linux home path for a Windows voice
+    # command. Explicitly spoken paths are retained; invented ones are unsafe.
+    if tool == "file":
+        for key in ("path", "source", "destination"):
+            value = params.get(key)
+            if isinstance(value, str) and re.match(r"^/(?:home|Users)/", value, re.IGNORECASE):
+                if value.lower() not in raw_text.lower():
+                    logger.warning("Rejected unmentioned Linux path from intent: %s", value)
+                    return Intent(
+                        tool="ai", action="chat",
+                        params={"text": raw_text}, confidence=0.0, raw_text=raw_text,
+                    )
+
     # Validate tool exists
     if tool not in VALID_ACTIONS:
         logger.warning("Unknown tool '%s', falling back to AI chat.", tool)
@@ -141,11 +155,20 @@ def parse_intent(text: str) -> Intent:
     Returns:
         Validated Intent ready for routing.
     """
-    from brain.llm import get_provider
-
     if not text or not text.strip():
         return Intent(tool="ai", action="chat", params={"text": ""}, confidence=0.0, raw_text=text)
 
+    # Resolve known desktop commands locally first. This avoids an LLM round
+    # trip for common voice actions and makes them both faster and predictable.
+    from brain.llm import RuleBasedProvider
+    local_data = parse_json_safely(RuleBasedProvider().generate(text))
+    if local_data.get("tool") != "ai" or local_data.get("action") != "chat":
+        intent = validate_intent(local_data, raw_text=text)
+        logger.info("Parsed intent locally: %s", intent)
+        return intent
+
+    # Only unknown or conversational input reaches the configured LLM.
+    from brain.llm import get_provider
     provider = get_provider()
     logger.info("Parsing intent with %s: '%s'", provider.name, text[:80])
 

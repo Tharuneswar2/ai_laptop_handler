@@ -49,7 +49,7 @@ TTS_RATE = 175                  # words per minute
 TTS_VOLUME = 0.9                # 0.0 to 1.0
 
 # ─── AI Brain ─────────────────────────────────────────────────────────
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "rule_based")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 OLLAMA_MODEL = "phi3:mini"      # small model for Ollama
 OLLAMA_URL = "http://localhost:11434"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -60,7 +60,60 @@ MEMORY_MAX_ITEMS = 20           # keep last N interactions in context
 
 # ─── App Mappings (Linux) ─────────────────────────────────────────────
 # Map friendly names → executable commands
-APP_MAPPINGS = {
+if os.name == "nt":
+    # Each VS Code or Explorer command explicitly asks for a fresh window.
+    APP_MAPPINGS = {
+        "file explorer": ["explorer.exe", "/n,"],
+        "explorer": ["explorer.exe", "/n,"],
+        "windows explorer": ["explorer.exe", "/n,"],
+        "file manager": ["explorer.exe", "/n,"],
+        "files": ["explorer.exe", "/n,"],
+        "vscode": ["code", "--new-window"],
+        "vs code": ["code", "--new-window"],
+        "visual studio code": ["code", "--new-window"],
+        "terminal": "wt.exe",
+        "windows terminal": "wt.exe",
+        "calculator": "calc.exe",
+        "calc": "calc.exe",
+        "paint": "mspaint.exe",
+        "mspaint": "mspaint.exe",
+        "command prompt": "cmd.exe",
+        "cmd": "cmd.exe",
+        "powershell": "powershell.exe",
+        "task manager": "taskmgr.exe",
+        "taskmgr": "taskmgr.exe",
+        "settings": "ms-settings:",
+        "windows settings": "ms-settings:",
+        "control panel": "control.exe",
+        "microsoft store": "ms-windows-store:",
+        "store": "ms-windows-store:",
+        "windows store": "ms-windows-store:",
+        "notepad": "notepad.exe",
+        "text editor": "notepad.exe",
+        "chrome": "chrome.exe",
+        "google chrome": "chrome.exe",
+        "edge": "msedge.exe",
+        "microsoft edge": "msedge.exe",
+        "ms edge": "msedge.exe",
+        "firefox": "firefox.exe",
+        "spotify": "spotify.exe",
+        "discord": "Discord.exe",
+        "slack": "slack.exe",
+        "vlc": "vlc.exe",
+        "vlc media player": "vlc.exe",
+        "word": "winword.exe",
+        "microsoft word": "winword.exe",
+        "ms word": "winword.exe",
+        "excel": "excel.exe",
+        "microsoft excel": "excel.exe",
+        "ms excel": "excel.exe",
+        "powerpoint": "powerpnt.exe",
+        "microsoft powerpoint": "powerpnt.exe",
+        "ms powerpoint": "powerpnt.exe",
+        "ppt": "powerpnt.exe",
+    }
+else:
+    APP_MAPPINGS = {
     "chrome": "google-chrome",
     "google chrome": "google-chrome",
     "firefox": "firefox",
@@ -85,6 +138,10 @@ APP_MAPPINGS = {
     "libreoffice": "libreoffice",
     "thunderbird": "thunderbird",
 }
+
+# Browser voice mode follows the Nova wake-word flow by default. Set this to
+# false in .env only when using explicit tap-to-talk command activation.
+BROWSER_REQUIRE_WAKE_WORD = os.getenv("BROWSER_REQUIRE_WAKE_WORD", "true").lower() in {"1", "true", "yes"}
 
 # ─── Terminal Safety ──────────────────────────────────────────────────
 ALLOWED_TERMINAL_COMMANDS = {

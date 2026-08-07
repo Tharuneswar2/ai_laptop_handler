@@ -294,7 +294,7 @@
 
             case "waiting_wake":
                 setState(State.LISTENING);
-                dom.statusHint.textContent = 'Say "Hey Nova" to activate';
+                dom.statusHint.textContent = 'Tap to activate';
                 break;
 
             case "error":
@@ -333,7 +333,7 @@
                 dom.statusCard.classList.add("listening");
                 dom.statusRing.classList.add("listening");
                 dom.statusLabel.textContent = "Listening";
-                dom.statusHint.textContent = 'Say "Hey Nova" followed by your command';
+                dom.statusHint.textContent = "Tap the microphone, then say a command";
                 dom.micLabel.textContent = "Listening...";
                 break;
 
@@ -401,7 +401,7 @@
 
     function renderHistory() {
         if (commandHistory.length === 0) {
-            dom.historyList.innerHTML = '<p class="history-empty">No commands yet. Say "Hey Nova" to start!</p>';
+            dom.historyList.innerHTML = '<p class="history-empty">No commands yet. Tap the microphone and speak.</p>';
             return;
         }
 

@@ -148,6 +148,7 @@ def handle(intent: Intent) -> ToolResult:
         "brightness": lambda: set_brightness(params.get("level", 50)),
         "screenshot": lambda: take_screenshot(),
         "lock_screen": lambda: lock_screen(),
+        "sleep": lambda: ToolResult(success=True, message="Okay Boss, going to sleep."),
     }
     handler = actions.get(action)
     if handler:
