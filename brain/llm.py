@@ -146,6 +146,16 @@ class RuleBasedProvider(LLMProvider):
         (r"(?:search for|find) (?:my |the )?(resume|notes|pdf|document)", "file", "search", lambda m: {"pattern": m.group(1).strip()}),
         (r"(?:google |web )?search (?:for )?(.+?)(?:\s+on\s+(?:google|the web))?$", "browser", "google_search", lambda m: {"query": m.group(1).strip()}),
 
+        # 1b. Project creation
+        (r"create(?:d)? (?:a |a new |new )?project (?:name )?(?:called |named )(.+)", "project", "create", lambda m: {"name": m.group(1).strip()}),
+        (r"create(?:d)? (?:a |a new |new )?project (.+)", "project", "create", lambda m: {"name": m.group(1).strip()}),
+        (r"make (?:a |a new |new )?project (?:name )?(?:called |named )(.+)", "project", "create", lambda m: {"name": m.group(1).strip()}),
+        (r"set up a (?:new )?project (?:called |named )(.+)", "project", "create", lambda m: {"name": m.group(1).strip()}),
+
+        # 1c. Installed applications
+        (r"(?:list|show|display).*installed (?:apps|applications|software|programs)", "app", "list_installed", lambda m: {}),
+        (r"(?:list|show|display).*applications installed(?: in| on| the| my| pc| computer| laptop)*", "app", "list_installed", lambda m: {}),
+
         # 2. File & Folder operations
         (r"create (?:a )?(?:new )?folder (?:in (.+) )?(?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(2).strip()}),
         (r"make (?:a )?(?:new )?folder (?:called |named )?(.+)", "file", "create_folder", lambda m: {"path": m.group(1).strip()}),

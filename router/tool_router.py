@@ -6,7 +6,10 @@ Each handler takes an Intent and returns a ToolResult.
 """
 
 import logging
+import time
 from dataclasses import dataclass
+
+import config
 
 from brain.intent_parser import Intent
 
@@ -127,7 +130,13 @@ def route(intent: Intent) -> ToolResult:
 
     try:
         logger.info("Routing to %s.%s with params=%s", intent.tool, intent.action, intent.params)
+        start = time.monotonic()
         result = handler(intent)
+        duration_ms = int((time.monotonic() - start) * 1000)
+        if duration_ms >= config.SLOW_OPERATION_MS:
+            logger.warning("Slow operation %s.%s took %dms", intent.tool, intent.action, duration_ms)
+            result.data.setdefault("duration_ms", duration_ms)
+            result.data.setdefault("warning", "Operation exceeded expected duration; check the target application or path.")
         logger.info("Tool result: %s", result)
         return result
     except Exception as e:

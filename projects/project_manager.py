@@ -71,6 +71,15 @@ class ProjectManager:
             if "open_count" not in cols:
                 conn.execute("ALTER TABLE projects ADD COLUMN open_count INTEGER DEFAULT 0")
 
+            # Records from a different OS cannot be opened on this machine.
+            # Keep the database operational by removing only paths that no
+            # longer exist, then let a future scan register valid locations.
+            rows = conn.execute("SELECT id, path FROM projects").fetchall()
+            stale_ids = [row[0] for row in rows if not Path(row[1]).expanduser().exists()]
+            if stale_ids:
+                conn.executemany("DELETE FROM projects WHERE id = ?", [(record_id,) for record_id in stale_ids])
+                logger.info("Removed %d stale project record(s)", len(stale_ids))
+
             conn.commit()
             conn.close()
             logger.info("Project database ready at %s", self.db_path)
@@ -168,6 +177,28 @@ class ProjectManager:
         """Alias for register_project."""
         return self.register_project(name, path, aliases=aliases, framework=framework, tags=tags)
 
+    def create_project(self, name: str, path: str = "") -> ToolResult:
+        """Create a new project directory on disk and register it in the database."""
+        clean = (name or "").strip()
+        if not clean:
+            return ToolResult(success=False, message="A project name is required to create a project.")
+
+        if re.search(r'[<>:"/\\|?*\x00-\x1f]', clean):
+            return ToolResult(success=False, message=f"'{clean}' contains characters that are not allowed in a folder name.")
+
+        base = Path(path).expanduser().resolve() if path else config.PROJECTS_ROOT
+        target = base / clean
+        if target.exists():
+            return ToolResult(success=False, message=f"A project folder already exists at {target}.")
+
+        try:
+            target.mkdir(parents=True, exist_ok=False)
+        except Exception as e:
+            return ToolResult(success=False, message=f"Failed to create project folder: {e}")
+
+        logger.info("Created project directory '%s' at %s", clean, target)
+        return self.register_project(name=clean, path=str(target))
+
     def remove_project(self, name: str) -> ToolResult:
         """Remove a project from tracking."""
         try:
@@ -221,7 +252,15 @@ class ProjectManager:
             conn = sqlite3.connect(str(self.db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("SELECT * FROM projects ORDER BY last_opened DESC")
-            rows = [dict(r) for r in cursor.fetchall()]
+            rows = []
+            for row in cursor.fetchall():
+                record = dict(row)
+                path = Path(record["path"]).expanduser()
+                if not path.exists() or not path.is_dir():
+                    logger.warning("Ignoring stale project record '%s': %s", record["name"], record["path"])
+                    continue
+                record["path"] = str(path.resolve())
+                rows.append(record)
             conn.close()
             return rows
         except Exception as e:
@@ -406,6 +445,11 @@ def handle(intent: Intent) -> ToolResult:
         path = params.get("path", "")
         aliases = params.get("aliases", "")
         return pm.register_project(name, path, aliases=aliases)
+
+    elif action in ("create", "create_project", "new_project", "new"):
+        name = params.get("name", "") or params.get("project_name", "") or params.get("title", "")
+        path = params.get("path", "") or params.get("project_path", "")
+        return pm.create_project(name, path)
 
     elif action in ("remove", "remove_project"):
         return pm.remove_project(params.get("name", ""))

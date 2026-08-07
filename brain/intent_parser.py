@@ -7,8 +7,10 @@ and returns a validated Intent dataclass ready for routing.
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +55,14 @@ class Intent:
 
 VALID_ACTIONS = {
     "file": {"create_file", "create_folder", "move", "rename", "delete", "search", "open_latest", "find_duplicates", "clean_downloads", "archive_downloads", "archive", "unzip", "copy", "open_newest_pdf", "find_newest_pdf", "move_screenshots"},
-    "app": {"open", "close", "list", "open_folder", "open_terminal", "close_all"},
+    "app": {"open", "close", "list", "list_installed", "list_installed_apps", "installed", "open_folder", "open_terminal", "close_all"},
     "browser": {"open_url", "google_search", "youtube_search", "open_github", "open_doc", "watch_tutorial", "bookmark", "close_tab"},
     "system": {"battery", "ram", "cpu", "disk", "volume", "brightness", "brightness_up", "brightness_down", "diagnose_performance", "screenshot", "lock_screen"},
     "terminal": {"run"},
     "ai": {"summarize", "explain_code", "chat", "chat_pdf", "debug_error"},
     "vscode": {"open_project", "open_recent", "create_project", "open_workspace", "open_file", "install_extension", "run_task", "run_terminal", "reopen_last_workspace"},
     "developer": {"git_status", "git_commit", "git_push", "git_pull", "git_log", "create_venv", "activate_venv", "pip_install", "run_python", "run_backend", "docker_ps", "docker_logs", "docker_compose_up"},
-    "project": {"find", "open_recent", "list", "list_projects", "scan", "scan_projects", "add", "remove"},
+    "project": {"find", "open_recent", "list", "list_projects", "scan", "scan_projects", "add", "remove", "create", "create_project", "new_project"},
     "desktop": {"focus_app", "switch_app", "restore_session", "close_all", "minimize", "maximize", "get_state"},
     "vision": {"ocr_screen", "analyze_screen", "detect_objects", "screen_understanding", "read_screen", "ocr"},
 }
@@ -111,6 +113,103 @@ _FILE_EXPLORER_ACTIONS = {
     "open_file_explorer", "open_file_manager", "open_explorer", "explore",
     "open_files", "file_explorer", "show_file_explorer",
 }
+
+
+def _translate_natural_command(text: str) -> str:
+    """Translate natural language commands to actual terminal commands."""
+    text = text.strip().rstrip(".!?")
+
+    # Create directory patterns
+    m = re.match(r"^(?:make|create)\s+(?:a\s+|new\s+)?(?:directory|folder|dir)\s+(?:named?|called?|with name\s+)?(.+)$", text, re.IGNORECASE)
+    if m:
+        return f"mkdir {m.group(1).strip()}"
+
+    # List files
+    if re.match(r"^(?:list|show|display)\s+(?:the\s+)?(?:files?|contents?|directories?)", text, re.IGNORECASE):
+        return "dir" if os.name == "nt" else "ls"
+
+    # Show current directory
+    if re.match(r"^(?:where\s+(?:am\s+i|are\s+we)|current\s+(?:directory|folder|path)|show\s+(?:current\s+)?path)", text, re.IGNORECASE):
+        return "cd" if os.name == "nt" else "pwd"
+
+    # Show tree
+    if re.match(r"^(?:show|display)\s+(?:the\s+)?tree", text, re.IGNORECASE):
+        return "tree"
+
+    # System info
+    if re.match(r"^(?:show|display|get)\s+(?:system\s+)?info", text, re.IGNORECASE):
+        return "systeminfo" if os.name == "nt" else "uname -a"
+
+    # IP config
+    if re.match(r"^(?:show|display|get)\s+(?:my\s+)?(?:ip|network|wifi)", text, re.IGNORECASE):
+        return "ipconfig" if os.name == "nt" else "ip addr"
+
+    # Running processes
+    if re.match(r"^(?:show|list|display)\s+(?:running\s+)?(?:processes?|tasks?|programs?)", text, re.IGNORECASE):
+        return "tasklist" if os.name == "nt" else "ps aux"
+
+    # If no translation, return as-is (it's already a command)
+    return text
+
+
+def _direct_system_intent(text: str) -> Intent | None:
+    """Classify unambiguous desktop commands before the planner can see them."""
+    normalized = re.sub(r"\s+", " ", text.lower().strip()).rstrip(".?!")
+    normalized = re.sub(r"^(?:hey\s+(?:nova|innova|assistant)[, ]+)", "", normalized).strip()
+
+    # Let specialized and multi-step commands continue through the existing
+    # provider/planner rules; this classifier is only for single desktop tasks.
+    if re.search(r"\b(?:github|google|youtube|documentation|docs|website|url|first result)\b", normalized):
+        return None
+    if re.search(r"\b(?:newest|latest|recent) pdf\b", normalized):
+        return None
+
+    # "open terminal and run <command>" — extract and run the command
+    m = re.match(r"^(?:open )?terminal (?:and )?(?:run )?(.+)$", normalized)
+    if m:
+        command = m.group(1).strip()
+        command = _translate_natural_command(command)
+        return Intent("terminal", "run", {"command": command}, 0.9, text)
+
+    # "make/create a directory named X" — direct to terminal
+    m = re.match(r"^(?:make|create)\s+(?:a\s+|new\s+)?(?:directory|folder|dir)\s+(?:named?|called?|with name\s+)?(.+)$", normalized)
+    if m:
+        dirname = m.group(1).strip()
+        command = f"mkdir {dirname}"
+        return Intent("terminal", "run", {"command": command}, 0.9, text)
+
+    if re.search(r"\b(?:and|then)\b", normalized):
+        return None
+
+    if re.fullmatch(r"(?:open |launch )?(?:windows )?settings", normalized):
+        return Intent("app", "open", {"app_name": "settings"}, 0.99, text)
+    if re.fullmatch(r"(?:open )?(?:my |the )?downloads(?: folder)?(?: in (?:file )?explorer)?", normalized):
+        return Intent("app", "open_folder", {"path": str(Path.home() / "Downloads"), "name": "Downloads"}, 0.99, text)
+    if re.search(r"\b(?:list|show|display|what|which)\b", normalized) and re.search(r"\binstalled\b", normalized) and re.search(r"\b(?:apps|applications|software|programs)\b", normalized):
+        return Intent("app", "list_installed", {}, 0.98, text)
+    if re.fullmatch(r"(?:show|list) (?:installed|the installed)(?: apps| applications| software| programs)?", normalized):
+        return Intent("app", "list_installed", {}, 0.98, text)
+    if re.match(r"^(?:create|created|make|set up|setup)\s+(?:a\s+|new\s+)*project\s+(?:name\s+)?(?:called|named)\s+(.+)$", normalized):
+        project_name = re.sub(r"^(?:create|created|make|set up|setup)\s+(?:a\s+|new\s+)*project\s+(?:name\s+)?(?:called|named)\s+", "", normalized).strip()
+        return Intent("project", "create", {"name": project_name}, 0.95, text)
+    if re.match(r"^(?:create|created|make)\s+(?:a\s+|new\s+)*project\s+([a-zA-Z0-9_\- ]+)$", normalized):
+        project_name = re.sub(r"^(?:create|created|make)\s+(?:a\s+|new\s+)*project\s+", "", normalized).strip()
+        return Intent("project", "create", {"name": project_name}, 0.9, text)
+    if re.search(r"\b(?:show|list|what are|which are|present)\b.*\b(?:running|open)\b.*\b(?:apps|applications|processes)\b", normalized):
+        return Intent("app", "list", {}, 0.99, text)
+    if re.fullmatch(r"(?:show|list) (?:running )?(?:apps|applications|processes)", normalized):
+        return Intent("app", "list", {}, 0.99, text)
+    if re.match(r"^(?:close|quit|exit)\s+", normalized):
+        app_name = re.sub(r"^(?:close|quit|exit)\s+", "", normalized)
+        if app_name in ("tab", "this tab"):
+            return Intent("browser", "close_tab", {}, 0.99, text)
+        return Intent("app", "close", {"app_name": app_name}, 0.95, text)
+    if re.match(r"^(?:open|launch)\s+(?:the )?(?:file )?explorer$", normalized):
+        return Intent("app", "open", {"app_name": "file explorer"}, 0.99, text)
+    if re.match(r"^(?:open|launch)\s+", normalized) and not re.search(r"\b(?:project|repo|repository|backend)\b", normalized):
+        app_name = re.sub(r"^(?:open|launch)\s+", "", normalized)
+        return Intent("app", "open", {"app_name": app_name}, 0.9, text)
+    return None
 
 
 def _normalize_data(data: dict, raw_text: str) -> dict:
@@ -295,6 +394,11 @@ def parse_intent(text: str):
 
     if not text or not text.strip():
         return Intent(tool="ai", action="chat", params={"text": ""}, confidence=0.0, raw_text=text)
+
+    direct = _direct_system_intent(text)
+    if direct:
+        logger.info("Direct command classifier matched: %s", direct)
+        return direct
 
     # 1. Anaphoric pronoun resolution ("open it", "run it again", "close it")
     try:

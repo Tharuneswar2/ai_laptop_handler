@@ -8,6 +8,7 @@
  *  - Wake word state machine: IDLE → LISTENING → WAKE_DETECTED → COMMAND
  *  - Browser SpeechSynthesis for TTS
  *  - Mic permission handling and browser compatibility checks
+ *  - Auto-restart STT on visibility change, errors, and page focus
  */
 
 (function () {
@@ -25,10 +26,12 @@
     let recognition = null;
     let ws = null;
     let wsReconnectTimer = null;
-    let wsReconnectDelay = 1000;  // start at 1s, exponential backoff
+    let wsReconnectDelay = 1000;
     const WS_MAX_DELAY = 15000;
     let isListening = false;
     let commandHistory = [];
+    let sttHealthTimer = null;
+    const STT_RESTART_DELAY = 500;  // faster restart
 
     // ─── DOM Elements ──────────────────────────────────────────────────
     const $ = (id) => document.getElementById(id);
@@ -43,7 +46,7 @@
         connectionDot: $("connectionDot"),
         connectionText: $("connectionText"),
         interimText: $("interimText"),
-        finalText: $("finalText"),
+        transcriptLog: $("transcriptLog"),
         transcriptCard: $("transcriptCard"),
         transcriptLang: $("transcriptLang"),
         resultCard: $("resultCard"),
@@ -111,17 +114,17 @@
                 }
             }
 
-            // Show interim results
+            // Show interim results (live, updating in place)
             if (interimTranscript) {
                 dom.interimText.textContent = interimTranscript;
                 dom.transcriptCard.classList.add("active");
+                scrollToBottom(dom.transcriptLog);
             }
 
-            // Process final results
+            // Process final results — add to log and send to backend
             if (finalTranscript) {
                 dom.interimText.textContent = "";
-                dom.finalText.textContent = finalTranscript;
-                dom.finalText.classList.add("highlight");
+                addToTranscriptLog(finalTranscript.trim());
                 dom.transcriptCard.classList.remove("active");
 
                 // Send to backend via WebSocket
@@ -133,10 +136,13 @@
 
         recognition.onerror = (event) => {
             if (event.error === "aborted") {
-                // Aborted error occurs when recognition is stopped/started rapidly or without user interaction
-                console.log("Speech recognition paused/aborted.");
+                // Aborted — try to restart immediately
+                console.log("Speech recognition aborted, restarting...");
                 isListening = false;
-                setState(State.IDLE);
+                // Don't stop — just restart
+                if (currentState !== State.PROCESSING) {
+                    scheduleRestart();
+                }
                 return;
             }
 
@@ -148,7 +154,7 @@
                     stopListening();
                     break;
                 case "no-speech":
-                    // Normal — just silence
+                    // Normal — just silence, keep listening
                     break;
                 case "audio-capture":
                     showError("No microphone detected. Please connect a microphone and try again.");
@@ -163,22 +169,30 @@
         };
 
         recognition.onend = () => {
-            // Auto-restart with throttle delay if we should still be listening
+            // Auto-restart with fast delay if we should still be listening
             if (isListening) {
-                if (restartTimer) clearTimeout(restartTimer);
-                restartTimer = setTimeout(() => {
-                    if (isListening) {
-                        try {
-                            recognition.start();
-                        } catch (e) {
-                            console.warn("Failed to restart recognition:", e.message);
-                            isListening = false;
-                            setState(State.IDLE);
-                        }
-                    }
-                }, 1000);
+                scheduleRestart();
             }
         };
+
+        function scheduleRestart() {
+            if (restartTimer) clearTimeout(restartTimer);
+            restartTimer = setTimeout(() => {
+                if (isListening && currentState !== State.PROCESSING) {
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        console.warn("Failed to restart recognition:", e.message);
+                        // Retry again after longer delay
+                        setTimeout(() => {
+                            if (isListening) {
+                                try { recognition.start(); } catch (e2) { /* give up */ }
+                            }
+                        }, 2000);
+                    }
+                }
+            }, STT_RESTART_DELAY);
+        }
     }
 
     // ─── Listening Control ─────────────────────────────────────────────
@@ -431,6 +445,47 @@
         renderHistory();
     }
 
+    // ─── Transcript Log (ChatGPT Voice style) ─────────────────────────
+
+    let transcriptEntries = [];
+
+    function addToTranscriptLog(text) {
+        transcriptEntries.push(text);
+
+        const log = dom.transcriptLog;
+        if (!log) return;
+
+        // Clear "Waiting for speech..." placeholder
+        if (transcriptEntries.length === 1) {
+            log.innerHTML = "";
+        }
+
+        const entry = document.createElement("div");
+        entry.className = "transcript-entry";
+        entry.innerHTML = `<span class="transcript-label">You:</span> ${escapeHtml(text)}`;
+        log.appendChild(entry);
+
+        // Keep max 50 entries
+        while (log.children.length > 50) {
+            log.removeChild(log.firstChild);
+        }
+
+        scrollToBottom(log);
+    }
+
+    function scrollToBottom(element) {
+        if (element) {
+            element.scrollTop = element.scrollHeight;
+        }
+    }
+
+    function clearTranscriptLog() {
+        transcriptEntries = [];
+        if (dom.transcriptLog) {
+            dom.transcriptLog.innerHTML = '<p class="transcript-empty">Waiting for speech...</p>';
+        }
+    }
+
     // ─── Browser TTS ───────────────────────────────────────────────────
 
     function speak(text) {
@@ -486,6 +541,65 @@
         return div.innerHTML;
     }
 
+    // ─── Health Check ──────────────────────────────────────────────────
+
+    function startSttHealthCheck() {
+        // Periodically ensure STT is running when it should be
+        if (sttHealthTimer) clearInterval(sttHealthTimer);
+        sttHealthTimer = setInterval(() => {
+            if (isListening && currentState !== State.PROCESSING) {
+                // Check if recognition is actually running
+                try {
+                    // Try to start — if it throws "already started", that's fine
+                    recognition.start();
+                } catch (e) {
+                    // Already running — that's good
+                }
+            }
+        }, 5000);  // check every 5 seconds
+    }
+
+    function stopSttHealthCheck() {
+        if (sttHealthTimer) {
+            clearInterval(sttHealthTimer);
+            sttHealthTimer = null;
+        }
+    }
+
+    // ─── Visibility Change Handler ─────────────────────────────────────
+
+    function setupVisibilityHandler() {
+        document.addEventListener("visibilitychange", () => {
+            if (!isListening) return;
+
+            if (document.hidden) {
+                // Tab went to background — STT may be paused by browser
+                console.log("Tab hidden — STT may pause, will auto-resume.");
+            } else {
+                // Tab became visible — restart STT to ensure it's running
+                console.log("Tab visible — restarting STT.");
+                setTimeout(() => {
+                    if (isListening) {
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            // Already started
+                        }
+                    }
+                }, 200);
+            }
+        });
+
+        // Also handle page focus/blur
+        window.addEventListener("focus", () => {
+            if (isListening) {
+                setTimeout(() => {
+                    try { recognition.start(); } catch (e) { /* ok */ }
+                }, 200);
+            }
+        });
+    }
+
     // ─── Event Listeners ───────────────────────────────────────────────
 
     dom.micButton.addEventListener("click", toggleListening);
@@ -509,10 +623,12 @@
 
         initSpeechRecognition();
         connectWebSocket();
+        setupVisibilityHandler();
 
         // Attempt background start on load (active if mic permission previously granted)
         try {
             startListening();
+            startSttHealthCheck();
             console.log("Nova Voice Assistant — active and listening in background.");
         } catch (e) {
             console.log("Waiting for user permission / microphone tap.");

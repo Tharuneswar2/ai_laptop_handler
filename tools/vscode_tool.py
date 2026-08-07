@@ -24,33 +24,19 @@ logger = logging.getLogger(__name__)
 
 
 def _run_code_cmd(args: list, cwd: Optional[str] = None) -> ToolResult:
-    """Execute `code` binary with target arguments."""
+    """Launch VS Code without waiting for a large workspace to finish loading."""
     executable = "code.cmd" if os.name == "nt" else "code"
     cmd = [executable] + args
 
     try:
-        res = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            cwd=cwd,
-        )
-        if res.returncode == 0:
-            return ToolResult(success=True, message=f"VS Code opened target: {' '.join(args)}")
-        return ToolResult(success=False, message=f"VS Code failed: {res.stderr.strip() or res.stdout.strip()}")
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
+        logger.info("VS Code launch started for: %s", " ".join(args))
+        return ToolResult(success=True, message=f"VS Code launch started: {' '.join(args)}", data={"target": args, "stage": "launch_started"})
     except FileNotFoundError:
         # Fallback for Linux if 'code' isn't in PATH
         try:
-            res = subprocess.run(
-                ["/usr/bin/code"] + args,
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=cwd,
-            )
-            if res.returncode == 0:
-                return ToolResult(success=True, message=f"Opened VS Code: {' '.join(args)}")
+            subprocess.Popen(["/usr/bin/code"] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=cwd)
+            return ToolResult(success=True, message=f"VS Code launch started: {' '.join(args)}", data={"target": args, "stage": "launch_started"})
         except Exception:
             pass
         return ToolResult(success=False, message="VS Code executable ('code') not found in PATH.")

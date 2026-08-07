@@ -17,15 +17,26 @@ DATA_DIR = PROJECT_ROOT / "data"
 LOG_DIR = DATA_DIR / "logs"
 HISTORY_DB = DATA_DIR / "history.db"
 WEB_UI_DIR = PROJECT_ROOT / "ui" / "web"
+AI_STORAGE_DIR = PROJECT_ROOT / "ai_storage"
+PROJECTS_ROOT = Path(os.getenv("PROJECTS_ROOT") or (Path.home() / "Projects")).expanduser().resolve()
 
 # Ensure directories exist
 DATA_DIR.mkdir(exist_ok=True)
 LOG_DIR.mkdir(exist_ok=True)
+AI_STORAGE_DIR.mkdir(exist_ok=True)
 
 # ─── STT Provider ─────────────────────────────────────────────────────
-# "browser"        — Web Speech API via browser (default, no GPU needed)
+# "browser" — Web Speech API via browser (default)
+# "aws"     — Amazon Transcribe Streaming (when --aws flag is used)
 STT_PROVIDER = os.getenv("STT_PROVIDER", "browser")
 STT_LANGUAGE = os.getenv("STT_LANGUAGE", "en-US")  # BCP-47 language tag
+
+# ─── AWS Transcribe Settings ──────────────────────────────────────────
+AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
+AWS_LANGUAGE_CODE = os.getenv("AWS_LANGUAGE_CODE", "en-US")
+AWS_SAMPLE_RATE = int(os.getenv("AWS_SAMPLE_RATE", "16000"))
+AWS_VAD_ENABLED = os.getenv("AWS_VAD_ENABLED", "true").lower() in ("1", "true", "yes")
+AWS_WAKE_WORD_ENABLED = os.getenv("AWS_WAKE_WORD_ENABLED", "true").lower() in ("1", "true", "yes")
 
 # ─── Wake Word ────────────────────────────────────────────────────────
 WAKE_WORDS = ["hey nova", "hey assistant", "innova", "hey innova"]
@@ -56,41 +67,69 @@ if IS_WINDOWS:
     # Windows: launched via `cmd /c start <name>` (name resolved from PATH
     # or the App Paths registry). "explorer" opens File Explorer.
     APP_MAPPINGS = {
+        # Browsers
         "chrome": "chrome",
         "google chrome": "chrome",
         "firefox": "firefox",
         "brave": "brave",
         "edge": "msedge",
         "microsoft edge": "msedge",
+        # Editors / IDEs
         "vscode": "code",
         "vs code": "code",
         "visual studio code": "code",
+        "notepad": "notepad",
+        "text editor": "notepad",
+        # Terminals
         "terminal": "cmd",
         "command prompt": "cmd",
         "powershell": "powershell",
+        # File management
         "file explorer": "explorer",
         "file manager": "explorer",
         "files": "explorer",
         "explorer": "explorer",
         "this pc": "explorer",
+        # Windows built-ins
         "start menu": "start_menu",
         "start": "start_menu",
         "calculator": "calc",
         "settings": "ms-settings:",
-        "notepad": "notepad",
-        "text editor": "notepad",
         "paint": "mspaint",
+        "snipping tool": "ms-screenclip:",
+        "task manager": "taskmgr",
+        "character map": "charmap",
+        "magnifier": "magnify",
+        "on screen keyboard": "osk",
+        # Office
         "word": "winword",
         "excel": "excel",
         "powerpoint": "powerpnt",
         "outlook": "outlook",
+        "onenote": "onenote",
+        # Communication
         "spotify": "spotify",
         "discord": "discord",
         "slack": "slack",
+        "teams": "ms-teams:",
+        "zoom": "zoom",
+        "whatsapp": "whatsapp:",
+        # Media
         "vlc": "vlc",
-        "gimp": "gimp",
         "obs": "obs",
+        # Creative
+        "gimp": "gimp",
         "libreoffice": "libreoffice",
+        # Mail
+        "mail": "ms-mail:",
+        "windows mail": "ms-mail:",
+        # Store
+        "store": "ms-windows-store:",
+        "microsoft store": "ms-windows-store:",
+        # Windows Terminal (if installed)
+        "windows terminal": "wt",
+        "wt": "wt",
+        # Misc
         "thunderbird": "thunderbird",
     }
 else:
@@ -128,6 +167,12 @@ if IS_WINDOWS:
         "echo", "cls", "cd", "where python", "where git",
         "python --version", "pip --version",
         "git status",
+        "mkdir", "md",
+        "type",
+        "tree",
+        "tasklist",
+        "systeminfo",
+        "ipconfig",
     }
 else:
     ALLOWED_TERMINAL_COMMANDS = {
@@ -136,6 +181,7 @@ else:
         "pip --version", "pip3 --version",
         "date", "uptime", "free", "hostname",
         "cat /etc/os-release", "lsb_release -a",
+        "mkdir", "touch", "tree", "ps", "top",
     }
 
 BLOCKED_PATTERNS = [
@@ -146,6 +192,8 @@ BLOCKED_PATTERNS = [
 ]
 
 TERMINAL_TIMEOUT = 10  # seconds
+APP_CLOSE_TIMEOUT = 5  # seconds
+SLOW_OPERATION_MS = 10_000
 
 # ─── Logging ──────────────────────────────────────────────────────────
 LOG_LEVEL = "INFO"

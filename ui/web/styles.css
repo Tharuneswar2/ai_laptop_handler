@@ -348,6 +348,50 @@ body {
 .transcript-body {
     padding: 16px;
     min-height: 60px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.transcript-log {
+    max-height: 150px;
+    overflow-y: auto;
+    margin-bottom: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-subtle) transparent;
+}
+
+.transcript-log::-webkit-scrollbar {
+    width: 4px;
+}
+
+.transcript-log::-webkit-scrollbar-thumb {
+    background: var(--border-subtle);
+    border-radius: 2px;
+}
+
+.transcript-entry {
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    line-height: 1.5;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border-subtle);
+    animation: fade-in 0.2s ease-out;
+}
+
+.transcript-entry:last-child {
+    border-bottom: none;
+}
+
+.transcript-label {
+    color: var(--accent);
+    font-weight: 600;
+    margin-right: 8px;
+}
+
+.transcript-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-style: italic;
 }
 
 .transcript-interim {
@@ -356,6 +400,8 @@ body {
     font-style: italic;
     min-height: 1.4em;
     transition: color var(--transition);
+    padding-top: 4px;
+    border-top: 1px solid var(--border-subtle);
 }
 
 .transcript-final {
@@ -368,6 +414,11 @@ body {
 .transcript-final.highlight {
     color: var(--text-primary);
     font-weight: 500;
+}
+
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* ─── Result Card ─── */

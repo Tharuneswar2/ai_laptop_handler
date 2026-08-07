@@ -23,6 +23,7 @@ from pydantic import BaseModel
 import config
 from brain.intent_parser import parse_intent
 from brain.memory import Memory
+from conversation.conversation import get_conversation_engine
 from router.tool_router import route
 from voice.wakeword import check_text_for_wake_word
 
@@ -283,78 +284,54 @@ async def websocket_endpoint(ws: WebSocket):
                 })
                 continue
 
-            # ─── Process command ──────────────────────────────────
+            # ─── Process command via conversation engine ───────────
             start = time.time()
 
             _emit({"type": "processing", "text": text})
-            parsed = parse_intent(text)
 
-            from planner.task import ExecutionPlan
-            if isinstance(parsed, ExecutionPlan):
-                from planner.executor import execute_plan
-                result = execute_plan(parsed)
-                duration_ms = int((time.time() - start) * 1000)
+            conversation = get_conversation_engine()
+            response_text, result = conversation.process(text)
 
-                _emit({
-                    "type": "result",
-                    "success": result.success,
-                    "message": result.message,
-                    "tool": "planner",
-                    "action": "execute_plan",
-                    "duration_ms": duration_ms,
-                })
-
-                await ws.send_json({
-                    "type": "result",
-                    "success": result.success,
-                    "tool": "planner",
-                    "action": "execute_plan",
-                    "message": result.message,
-                    "original_text": text,
-                    "duration_ms": duration_ms,
-                    "speak": f"Completed goal: {parsed.goal}",
-                })
-                wake_active = False
-                continue
-
-            intent = parsed
-            result = route(intent)
             duration_ms = int((time.time() - start) * 1000)
+
+            success = result.success if result else True
+            tool = result.data.get("tool", "conversation") if result and result.data else "conversation"
+            action = result.data.get("action", "process") if result and result.data else "process"
 
             # Log to memory
             memory.add(
                 user_text=text,
-                intent=f"{intent.tool}.{intent.action}",
-                result=result.message,
-                status="ok" if result.success else "error",
+                intent=f"{tool}.{action}",
+                result=response_text,
+                status="ok" if success else "error",
                 duration_ms=duration_ms,
             )
 
             _emit({
                 "type": "result",
-                "success": result.success,
-                "message": result.message,
-                "tool": intent.tool,
-                "action": intent.action,
+                "success": success,
+                "message": response_text,
+                "tool": tool,
+                "action": action,
                 "duration_ms": duration_ms,
             })
 
-            # Send result back to browser
+            # Send conversational response back to browser
             await ws.send_json({
                 "type": "result",
-                "success": result.success,
-                "tool": intent.tool,
-                "action": intent.action,
-                "message": result.message,
+                "success": success,
+                "tool": tool,
+                "action": action,
+                "message": response_text,
                 "original_text": text,
                 "duration_ms": duration_ms,
-                "speak": result.message[:200] if result.success else "",
+                "speak": response_text[:200],
             })
 
             logger.info(
-                "WS command: '%s' → %s.%s → %s (%dms)",
-                text[:40], intent.tool, intent.action,
-                "ok" if result.success else "error", duration_ms,
+                "WS command: '%s' → %s (%dms) [%s]",
+                text[:40], "ok" if success else "error", duration_ms,
+                conversation.get_state().get("current_task", ""),
             )
 
             # Reset wake state — require wake word again for next command
@@ -373,13 +350,36 @@ async def websocket_endpoint(ws: WebSocket):
 
 # ─── Server Startup ──────────────────────────────────────────────────
 
+def _open_browser_background(url: str) -> None:
+    """Open browser in background after a short delay."""
+    import threading
+    import webbrowser
+
+    def _delayed_open():
+        import time
+        time.sleep(2)  # Wait for server to be ready
+        try:
+            webbrowser.open(url)
+            logger.info("Browser opened: %s", url)
+        except Exception as e:
+            logger.warning("Failed to open browser: %s", e)
+
+    thread = threading.Thread(target=_delayed_open, daemon=True)
+    thread.start()
+
+
 def start_server():
     """Start the API server."""
     import uvicorn
 
+    url = f"http://{config.API_HOST}:{config.API_PORT}"
     logger.info("Starting API server on %s:%d", config.API_HOST, config.API_PORT)
-    logger.info("Web UI: http://%s:%d", config.API_HOST, config.API_PORT)
-    logger.info("API docs: http://%s:%d/docs", config.API_HOST, config.API_PORT)
+    logger.info("Web UI: %s", url)
+    logger.info("API docs: %s/docs", url)
+
+    # Auto-launch browser in background
+    _open_browser_background(url)
+
     uvicorn.run(app, host=config.API_HOST, port=config.API_PORT, log_level="warning")
 
 

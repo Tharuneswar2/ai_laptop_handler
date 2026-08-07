@@ -16,6 +16,12 @@ from router.tool_router import ToolResult
 
 logger = logging.getLogger(__name__)
 
+_APP_LAUNCH_RE = re.compile(
+    r"^(?:open|launch|start)\s+(?:the\s+)?(?:chrome|firefox|edge|vscode|vs code|"
+    r"visual studio code|settings|file explorer|explorer|notepad|calculator|terminal)\b",
+    re.IGNORECASE,
+)
+
 
 def _is_command_allowed(command: str) -> bool:
     """
@@ -88,6 +94,14 @@ def run_command(command: str) -> ToolResult:
     """
     if not command:
         return ToolResult(success=False, message="No command provided.")
+
+    if _APP_LAUNCH_RE.match(command.strip()):
+        logger.warning("Rejected application launch in terminal router: %s", command)
+        return ToolResult(
+            success=False,
+            message="Application launch requests must use the app router, not terminal.run.",
+            data={"command": command, "reason": "app_action_misrouted"},
+        )
 
     if os.name == "nt":
         command = _translate_windows_command(command)
