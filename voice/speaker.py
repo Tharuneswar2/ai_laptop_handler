@@ -61,20 +61,74 @@ def speak(text: str) -> None:
     """
     Speak the given text aloud.
 
-    Args:
-        text: The text to convert to speech and play.
+    Tries pyttsx3 first, and falls back to native OS speech tools
+    (spd-say/espeak on Linux, say on macOS, PowerShell SAPI on Windows)
+    if pyttsx3 is not installed or unavailable.
     """
     if not text:
         return
 
+    text_clean = text.replace("*", "").replace("`", "").strip()
+
+    # 1. Try pyttsx3 engine
     try:
         engine = _get_thread_engine()
-        logger.info("Speaking: '%s'", text[:80])
-        engine.say(text)
-        engine.runAndWait()
-        logger.debug("Speech complete.")
+        if engine is not None:
+            logger.info("Speaking (pyttsx3): '%s'", text_clean[:80])
+            engine.say(text_clean)
+            engine.runAndWait()
+            logger.debug("Speech complete.")
+            return
     except Exception as e:
-        logger.error("TTS playback failed: %s", e)
+        logger.debug("pyttsx3 TTS unavailable (%s), trying native OS fallback...", e)
+
+    # 2. System fallbacks (Linux: spd-say / espeak, macOS: say, Windows: PowerShell)
+    import shutil
+    import subprocess
+
+    if sys.platform.startswith("linux"):
+        if shutil.which("spd-say"):
+            try:
+                logger.info("Speaking (spd-say): '%s'", text_clean[:80])
+                subprocess.run(["spd-say", "-t", "female1", "-r", "5", text_clean], check=False)
+                return
+            except Exception as exc:
+                logger.warning("spd-say failed: %s", exc)
+        elif shutil.which("espeak-ng"):
+            try:
+                logger.info("Speaking (espeak-ng): '%s'", text_clean[:80])
+                subprocess.run(["espeak-ng", text_clean], check=False)
+                return
+            except Exception as exc:
+                logger.warning("espeak-ng failed: %s", exc)
+        elif shutil.which("espeak"):
+            try:
+                logger.info("Speaking (espeak): '%s'", text_clean[:80])
+                subprocess.run(["espeak", text_clean], check=False)
+                return
+            except Exception as exc:
+                logger.warning("espeak failed: %s", exc)
+
+    elif sys.platform == "darwin":
+        if shutil.which("say"):
+            try:
+                logger.info("Speaking (say): '%s'", text_clean[:80])
+                subprocess.run(["say", text_clean], check=False)
+                return
+            except Exception as exc:
+                logger.warning("macOS say failed: %s", exc)
+
+    elif sys.platform == "win32":
+        try:
+            logger.info("Speaking (PowerShell SAPI): '%s'", text_clean[:80])
+            safe_text = text_clean.replace('"', '')
+            ps_script = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{safe_text}")'
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], check=False)
+            return
+        except Exception as exc:
+            logger.warning("Windows PowerShell TTS failed: %s", exc)
+
+    logger.warning("No working TTS engine available for text: %s", text_clean)
 
 
 def speak_async(text: str) -> None:
