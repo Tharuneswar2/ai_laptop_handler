@@ -155,7 +155,7 @@ def _translate_natural_command(text: str) -> str:
 def _direct_system_intent(text: str) -> Intent | None:
     """Classify unambiguous desktop commands before the planner can see them."""
     normalized = re.sub(r"\s+", " ", text.lower().strip()).rstrip(".?!")
-    normalized = re.sub(r"^(?:hey\s+(?:nova|innova|assistant)[, ]+)", "", normalized).strip()
+    normalized = re.sub(r"^(?:hey\s+(?:nova|assistant)[, ]+)", "", normalized).strip()
 
     # Let specialized and multi-step commands continue through the existing
     # provider/planner rules; this classifier is only for single desktop tasks.

@@ -93,7 +93,7 @@ def setup_debug_logging() -> None:
     debug_handler.setFormatter(formatter)
     root.addHandler(debug_handler)
 
-    for name in ("speech", "speech.amazon_transcribe", "speech.microphone", "speech.vad"):
+    for name in ("speech", "speech.amazon_transcribe", "speech.microphone", "speech.vad", "voice.speaker"):
         logging.getLogger(name).setLevel(logging.DEBUG)
 
 
@@ -339,12 +339,13 @@ async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> N
         has_wake, command_text = wake_detector.check(full_text)
 
         if has_wake:
-            wake_detector.consume_wake()
             if command_text:
+                wake_detector.consume_wake()
                 console.print(f"  [bold cyan]Command:[/] {command_text}")
                 console.print("  [dim]Sending command to AI...[/]")
                 _process_in_thread(command_text, memory)
             else:
+                # Wake word alone — keep wake_active True so next utterance is the command
                 console.print("  [bold yellow]Listening for command...[/]")
                 try:
                     from voice.speaker import speak

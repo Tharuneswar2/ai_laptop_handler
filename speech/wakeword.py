@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Default wake words
-DEFAULT_WAKE_WORDS = ["hey nova", "nova", "hey assistant", "innova", "hey innova"]
+DEFAULT_WAKE_WORDS = ["hey nova", "nova", "hey assistant"]
 
 
 class WakeWordDetector:
@@ -53,11 +53,19 @@ class WakeWordDetector:
 
         text_lower = text.lower().strip()
 
-        # Check each wake word
+        # Check each wake word (allow optional punctuation between words)
         for wake in self.wake_words:
-            if wake in text_lower:
+            # Build flexible pattern: "hey nova" matches "hey nova", "hey, nova", "hey.nova", etc.
+            words = wake.split()
+            if len(words) == 1:
+                pattern = r"\b" + re.escape(wake) + r"\b"
+            else:
+                # Allow optional punctuation/spaces between words
+                pattern = r"\b" + r"[\s,.\-!?']*".join(re.escape(w) for w in words) + r"\b"
+
+            if re.search(pattern, text_lower):
                 # Remove wake word from text and clean up leading punctuation
-                remaining = re.sub(re.escape(wake), "", text, flags=re.IGNORECASE).strip()
+                remaining = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
                 remaining = re.sub(r"^[,\s:!.\-]+", "", remaining).strip()
                 self._wake_active = True
                 logger.info("Wake word detected: '%s'", wake)

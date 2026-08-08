@@ -39,13 +39,13 @@ AWS_VAD_ENABLED = os.getenv("AWS_VAD_ENABLED", "true").lower() in ("1", "true", 
 AWS_WAKE_WORD_ENABLED = os.getenv("AWS_WAKE_WORD_ENABLED", "true").lower() in ("1", "true", "yes")
 
 # ─── Wake Word ────────────────────────────────────────────────────────
-WAKE_WORDS = ["hey nova", "hey assistant", "innova", "hey innova"]
+WAKE_WORDS = ["hey nova", "hey assistant", "nova"]  # list of wake words to listen for
 WAKE_WORD_ENABLED = True        # set False to skip wake word entirely
 
 # ─── TTS Settings ─────────────────────────────────────────────────────
 TTS_ENGINE = "pyttsx3"          # pyttsx3 | piper (future)
-TTS_RATE = 175                  # words per minute
-TTS_VOLUME = 0.9                # 0.0 to 1.0
+TTS_RATE = 200                  # words per minute (default 200, increase for faster speech)
+TTS_VOLUME = 1.0                # 0.0 to 1.0 (max volume)
 
 # ─── AI Brain ─────────────────────────────────────────────────────────
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "rule_based")

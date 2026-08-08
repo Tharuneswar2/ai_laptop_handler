@@ -173,7 +173,7 @@ class ConversationEngine:
         _greeting_words = {
             "hello", "hi", "hai", "hey", "good morning", "good afternoon",
             "good evening", "howdy", "greetings", "sup", "what's up",
-            "hey nova", "hey assistant", "innova", "hey innova",
+            "hey nova", "hey assistant",
         }
         if text_lower in _greeting_words or text_lower.rstrip("!.?") in _greeting_words:
             return CreatorIntent(
