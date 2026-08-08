@@ -20,6 +20,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 # Ensure project root is in the Python path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -230,6 +231,13 @@ def run_web_mode() -> None:
 
 # ─── AWS Voice Mode ─────────────────────────────────────────────────
 
+# How long to wait (in seconds) after the last FINAL transcript before
+# dispatching the accumulated utterance. This gives the user time to
+# finish multi-segment sentences without the half-sentence being sent
+# to the LLM prematurely.
+UTTERANCE_SILENCE_TIMEOUT = 1.5  # seconds
+
+
 async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> None:
     """
     Headless AWS voice assistant mode.
@@ -294,6 +302,66 @@ async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> N
             # Windows doesn't support add_signal_handler
             pass
 
+    # ── Utterance accumulation state ──────────────────────────────────
+    # Instead of processing each FINAL segment immediately, we buffer
+    # them and only dispatch after the user stops speaking (no new
+    # FINAL events for UTTERANCE_SILENCE_TIMEOUT seconds).
+    accumulated_segments: list[str] = []  # buffered FINAL text segments
+    flush_task: Optional[asyncio.Task] = None  # pending flush timer
+    user_is_speaking = False  # True while PARTIAL events are arriving
+
+    async def _flush_accumulated() -> None:
+        """
+        Wait for silence timeout, then dispatch the accumulated utterance.
+
+        Called as an asyncio task each time a FINAL segment arrives.
+        If a new FINAL arrives before this fires, this task is cancelled
+        and a fresh one is started (debounce pattern).
+        """
+        nonlocal accumulated_segments, flush_task
+
+        await asyncio.sleep(UTTERANCE_SILENCE_TIMEOUT)
+
+        # Combine all accumulated segments into a single utterance
+        full_text = " ".join(accumulated_segments).strip()
+        accumulated_segments.clear()
+        flush_task = None
+
+        if not full_text:
+            return
+
+        # Show the full assembled utterance
+        console.print(f"\r  [bold green]You (complete):[/] [white]{full_text}[/]" + " " * 20)
+
+        # Check wake word on the full text
+        has_wake, remaining = wake_detector.check(full_text)
+
+        if has_wake:
+            wake_detector.consume_wake()
+            if remaining:
+                # Command after wake word — process it
+                console.print(f"  [bold cyan]Command:[/] {remaining}")
+                console.print("  [dim]Sending command to AI...[/]")
+                _process_in_thread(remaining, memory)
+            else:
+                # Wake word only — acknowledge and wait
+                console.print("  [bold yellow]Listening for command...[/]")
+                try:
+                    from voice.speaker import speak
+                    speak("Yes, Sir?")
+                except Exception:
+                    pass
+        elif wake_detector.is_wake_active:
+            # Command after wake (split utterance across flushes)
+            wake_detector.consume_wake()
+            console.print(f"  [bold cyan]Command:[/] {full_text}")
+            console.print("  [dim]Sending command to AI...[/]")
+            _process_in_thread(full_text, memory)
+        else:
+            # No wake word — ignore
+            if debug:
+                logger.debug("Ignoring (no wake word): %s", full_text[:60])
+
     try:
         await provider.start()
 
@@ -317,8 +385,15 @@ async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> N
                 continue
 
             if event.kind == TranscriptKind.PARTIAL:
-                # Live partial transcript
+                # Live partial transcript — user is still speaking
+                user_is_speaking = True
                 console.print(f"\r  [dim]You:[/] [white]{event.text}[/]", end="")
+
+                # If we have a pending flush and a new partial arrives,
+                # cancel it — the user is still talking
+                if flush_task and not flush_task.done():
+                    flush_task.cancel()
+                    flush_task = None
                 continue
 
             if event.kind == TranscriptKind.FINAL:
@@ -326,37 +401,19 @@ async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> N
                 if not text:
                     continue
 
-                # Show final transcript
-                console.print(f"\r  [bold green]You:[/] [white]{text}[/]" + " " * 20)
+                user_is_speaking = False
 
-                # Check wake word
-                has_wake, remaining = wake_detector.check(text)
+                # Show the segment as it arrives (informational)
+                console.print(f"\r  [dim]Segment:[/] [white]{text}[/]" + " " * 20)
 
-                if has_wake:
-                    wake_detector.consume_wake()
-                    if remaining:
-                        # Command after wake word — process it
-                        console.print(f"  [bold cyan]Command:[/] {remaining}")
-                        console.print("  [dim]Sending command to AI...[/]")
-                        _process_in_thread(remaining, memory)
-                    else:
-                        # Wake word only — acknowledge
-                        console.print("  [bold yellow]Listening for command...[/]")
-                        try:
-                            from voice.speaker import speak
-                            speak("Yes, Sir?")
-                        except Exception:
-                            pass
-                elif wake_detector.is_wake_active:
-                    # Command after wake (split utterance)
-                    wake_detector.consume_wake()
-                    console.print(f"  [bold cyan]Command:[/] {text}")
-                    console.print("  [dim]Sending command to AI...[/]")
-                    _process_in_thread(text, memory)
-                else:
-                    # No wake word — ignore
-                    if debug:
-                        logger.debug("Ignoring (no wake word): %s", text[:40])
+                # Accumulate this segment
+                accumulated_segments.append(text)
+
+                # Cancel any pending flush timer and start a new one
+                # (debounce — resets the silence countdown)
+                if flush_task and not flush_task.done():
+                    flush_task.cancel()
+                flush_task = asyncio.create_task(_flush_accumulated())
 
             # Speak startup message once after first successful connection
             if not startup_spoken and event.kind in (TranscriptKind.PARTIAL, TranscriptKind.FINAL):
@@ -373,6 +430,9 @@ async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> N
         logger.error("AWS voice mode error: %s", e, exc_info=True)
         console.print(f"  [red]Fatal error: {e}[/]")
     finally:
+        # Cancel any pending flush
+        if flush_task and not flush_task.done():
+            flush_task.cancel()
         console.print("  [dim]Stopping microphone...[/]")
         await provider.stop()
         console.print("  [dim]Stopping Amazon Transcribe...[/]")
