@@ -9,16 +9,16 @@ Modes:
   python main.py              # Web UI mode (default, browser STT via WebSocket)
   python main.py --text       # Text-only mode (keyboard input)
   python main.py --api        # Start API server only (REST endpoints)
-  python main.py --aws        # Amazon Transcribe Streaming (server-side STT)
+  python main.py --aws        # Amazon Transcribe Streaming (headless voice mode)
   python main.py --aws --debug  # AWS mode with debug logging
 """
 
 import argparse
 import asyncio
 import logging
+import signal
 import sys
 import time
-import signal
 from pathlib import Path
 
 # Ensure project root is in the Python path
@@ -42,11 +42,7 @@ from ui.terminal_ui import (
 )
 
 
-def shutdown(sig, frame):
-    print("\nStopping...")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, shutdown)
+logger = logging.getLogger(__name__)
 
 
 # ─── Logging Setup ───────────────────────────────────────────────────
@@ -55,12 +51,8 @@ def setup_logging() -> None:
     """Configure logging — full detail to file, minimal output to console."""
     log_file = config.LOG_DIR / "nova.log"
 
-    # Root logger captures everything at INFO level
     root = logging.getLogger()
     root.setLevel(getattr(logging, config.LOG_LEVEL))
-
-    # This function may be reached more than once by embedded/API entry points.
-    # Avoid duplicate lines while keeping every handler explicitly UTF-8.
     root.handlers.clear()
 
     formatter = logging.Formatter(
@@ -68,12 +60,10 @@ def setup_logging() -> None:
         datefmt=config.LOG_DATE_FORMAT,
     )
 
-    # File handler: all INFO and above (for debugging)
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
 
-    # Console handler: only WARNING and above (keep terminal clean)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.WARNING)
     console_handler.setFormatter(formatter)
@@ -81,7 +71,6 @@ def setup_logging() -> None:
     root.addHandler(file_handler)
     root.addHandler(console_handler)
 
-    # Suppress noisy libraries entirely
     logging.getLogger("urllib3").setLevel(logging.ERROR)
     logging.getLogger("httpx").setLevel(logging.ERROR)
     logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
@@ -94,7 +83,6 @@ def setup_debug_logging() -> None:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
 
-    # Add debug console handler
     formatter = logging.Formatter(
         fmt=config.LOG_FORMAT,
         datefmt=config.LOG_DATE_FORMAT,
@@ -104,12 +92,8 @@ def setup_debug_logging() -> None:
     debug_handler.setFormatter(formatter)
     root.addHandler(debug_handler)
 
-    # Enable debug for speech modules
     for name in ("speech", "speech.amazon_transcribe", "speech.microphone", "speech.vad"):
         logging.getLogger(name).setLevel(logging.DEBUG)
-
-
-logger = logging.getLogger(__name__)
 
 
 # ─── Core Pipeline ───────────────────────────────────────────────────
@@ -117,18 +101,11 @@ logger = logging.getLogger(__name__)
 def process_command(text: str, memory: Memory, speak_response: bool = True) -> None:
     """
     Process a single user command or multi-step goal through the full pipeline.
-
-    Args:
-        text: The user's command or goal text.
-        memory: Memory instance for logging.
-        speak_response: Whether to speak the response aloud.
     """
     start = time.time()
 
-    # 1. Parse intent or execution plan
     parsed = parse_intent(text)
 
-    # 2. Handle ExecutionPlan (multi-step goal)
     from planner.task import ExecutionPlan
     if isinstance(parsed, ExecutionPlan):
         console.print(f"  [bold cyan]Execution Plan generated for goal:[/] [white]{parsed.goal}[/]")
@@ -158,7 +135,6 @@ def process_command(text: str, memory: Memory, speak_response: bool = True) -> N
         print_divider()
         return
 
-    # 3. Handle single Intent
     intent = parsed
     print_intent(intent.tool, intent.action)
 
@@ -216,7 +192,6 @@ def run_text_mode(memory: Memory) -> None:
                 print_divider()
                 continue
 
-            # Strip wake word if present
             from voice.wakeword import check_text_for_wake_word
             _, clean_text = check_text_for_wake_word(text)
             if clean_text:
@@ -233,144 +208,190 @@ def run_text_mode(memory: Memory) -> None:
 
 # ─── Web Mode ────────────────────────────────────────────────────────
 
-def run_web_mode(aws_mode: bool = False, debug: bool = False) -> None:
+def run_web_mode() -> None:
     """
     Start the web UI with browser-based STT.
-
-    Optionally starts Amazon Transcribe provider if --aws flag is used.
     """
-    from speech.factory import create_provider
-    from speech.provider import get_provider
-
-    # Create speech provider
-    provider = create_provider(
-        use_aws=aws_mode,
-        aws_region=config.AWS_REGION,
-        aws_language=config.AWS_LANGUAGE_CODE,
-        aws_sample_rate=config.AWS_SAMPLE_RATE,
-        wake_words=config.WAKE_WORDS,
-        enable_vad=config.AWS_VAD_ENABLED,
-        debug=debug,
-    )
-
     print_banner()
-
-    if aws_mode:
-        console.print("  [bold green]Speech Provider:[/]")
-        console.print("  [bold cyan]Amazon Transcribe Streaming[/]")
-    else:
-        console.print("  [bold green]Speech Provider:[/]")
-        console.print("  [bold cyan]Default Local Provider (Browser STT)[/]")
+    console.print("  [bold green]Speech Provider:[/]")
+    console.print("  [bold cyan]Default Local Provider (Browser STT)[/]")
     console.print()
-
-    if not aws_mode:
-        console.print(f"  [bold white]Open your browser:[/] [cyan]http://{config.API_HOST}:{config.API_PORT}[/]")
-        console.print(f"  [bold white]API docs:[/]          [cyan]http://{config.API_HOST}:{config.API_PORT}/docs[/]")
-        console.print()
-        console.print("  [dim]Use Chrome or Edge for best Speech Recognition support.[/]")
-        console.print("  [dim]Keep the browser tab open for continuous listening.[/]")
-    else:
-        console.print("  [dim]Speak into your microphone. Say 'Hey Nova' to activate.[/]")
-        console.print("  [dim]Partial transcripts will appear in real-time.[/]")
-
+    console.print(f"  [bold white]Open your browser:[/] [cyan]http://{config.API_HOST}:{config.API_PORT}[/]")
+    console.print(f"  [bold white]API docs:[/]          [cyan]http://{config.API_HOST}:{config.API_PORT}/docs[/]")
+    console.print()
+    console.print("  [dim]Use Chrome or Edge for best Speech Recognition support.[/]")
+    console.print("  [dim]Keep the browser tab open for continuous listening.[/]")
     console.print("  [dim]Press Ctrl+C to stop the server.[/]")
     print_divider()
 
     from api.server import start_server
-
-    # If AWS mode, register provider and run background listener
-    if aws_mode:
-        _run_aws_mode(provider, debug)
-    else:
-        start_server()
+    start_server()
 
 
-def _run_aws_mode(provider, debug: bool = False) -> None:
-    """Run the application with Amazon Transcribe as the speech provider."""
-    import threading
-    from api.server import start_server
+# ─── AWS Voice Mode ─────────────────────────────────────────────────
+
+async def run_aws_voice_mode(use_webrtc: bool = False, debug: bool = False) -> None:
+    """
+    Headless AWS voice assistant mode.
+
+    Uses Amazon Transcribe Streaming for live STT.
+    No browser, no web server, no GUI.
+    Only microphone interaction.
+
+    Args:
+        use_webrtc: If True, use WebRTC microphone (better audio processing).
+        debug: Enable debug logging.
+    """
+    from speech.factory import create_provider
     from speech.provider import TranscriptEvent, TranscriptKind
     from speech.wakeword import WakeWordDetector
-    from voice.speaker import speak
 
     memory = Memory()
     wake_detector = WakeWordDetector(wake_words=config.WAKE_WORDS)
-    loop = asyncio.new_event_loop()
 
-    def aws_listener():
-        """Background thread running the AWS Transcribe stream."""
-        asyncio.set_event_loop(loop)
+    # Create provider
+    provider = create_provider(
+        use_aws=not use_webrtc,
+        use_aws_live=use_webrtc,
+        aws_region=config.AWS_REGION,
+        aws_language=config.AWS_LANGUAGE_CODE,
+        aws_sample_rate=config.AWS_SAMPLE_RATE,
+        wake_words=config.WAKE_WORDS,
+        debug=debug,
+    )
 
-        async def _run():
-            from speech.microphone import get_microphone_stream
+    # Print banner
+    console.print()
+    console.print("  [bold cyan]NOVA AI LAPTOP HANDLER[/]")
+    if use_webrtc:
+        console.print("  [bold cyan]AWS VOICE MODE (WebRTC)[/]")
+    else:
+        console.print("  [bold cyan]AWS VOICE MODE[/]")
+    console.print()
+    console.print("  [bold green]STT Provider:[/]   Amazon Transcribe" + (" (WebRTC)" if use_webrtc else ""))
+    console.print("  [bold green]Mode:[/]           Headless Voice")
+    console.print("  [bold green]Microphone:[/]     Initializing...")
+    console.print("  [bold green]Status:[/]         Connecting...")
+    console.print()
+    print_divider()
 
-            await provider.start()
+    # Track startup message
+    startup_spoken = False
+    stop_event = asyncio.Event()
 
-            try:
-                async for event in provider.stream():
-                    if event.kind == TranscriptKind.ERROR:
-                        console.print(f"  [yellow]STT: {event.error}[/]")
-                        continue
+    # Handle CTRL+C cleanly
+    loop = asyncio.get_event_loop()
 
-                    if event.kind == TranscriptKind.PARTIAL:
-                        # Show live partial transcript (overwrite line)
-                        console.print(f"\r  [dim]You:[/] [white]{event.text}[/]", end="")
-                        continue
+    def _signal_handler():
+        console.print("\n")
+        console.print("  [dim]Stopping...[/]")
+        stop_event.set()
 
-                    if event.kind == TranscriptKind.FINAL:
-                        text = event.text.strip()
-                        if not text:
-                            continue
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _signal_handler)
+        except NotImplementedError:
+            # Windows doesn't support add_signal_handler
+            pass
 
-                        # Clear partial line and show final
-                        console.print(f"\r  [bold green]You:[/] [white]{text}[/]" + " " * 20)
+    try:
+        await provider.start()
 
-                        # Check wake word
-                        has_wake, remaining = wake_detector.check(text)
+        # Update status
+        console.print("  [bold green]Microphone:[/]     Ready")
+        console.print("  [bold green]Status:[/]         Listening")
+        console.print()
+        print_divider()
 
-                        if has_wake:
-                            wake_detector.consume_wake()
-                            if remaining:
-                                # Command after wake word
-                                console.print(f"  [bold cyan]Command:[/] {remaining}")
-                                _process_in_main_thread(remaining, memory)
-                            else:
-                                console.print("  [bold yellow]Listening for command...[/]")
-                                speak("Yes, Sir?")
-                        elif wake_detector.is_wake_active:
-                            # Command after wake
-                            wake_detector.consume_wake()
-                            console.print(f"  [bold cyan]Command:[/] {text}")
-                            _process_in_main_thread(text, memory)
-                        else:
-                            logger.debug("Ignoring (no wake word): %s", text[:40])
+        # Stream events
+        async for event in provider.stream():
+            if stop_event.is_set():
+                break
 
-            except Exception as e:
-                logger.error("AWS listener error: %s", e)
-                console.print(f"  [red]AWS Transcribe error: {e}[/]")
-            finally:
-                await provider.stop()
+            if event.kind == TranscriptKind.ERROR:
+                # Reconnection or error messages
+                if "Reconnecting" in (event.error or ""):
+                    console.print(f"  [yellow]{event.error}[/]")
+                else:
+                    console.print(f"  [red]STT Error: {event.error}[/]")
+                continue
 
-        loop.run_until_complete(_run())
+            if event.kind == TranscriptKind.PARTIAL:
+                # Live partial transcript
+                console.print(f"\r  [dim]You:[/] [white]{event.text}[/]", end="")
+                continue
 
-    def _process_in_main_thread(text: str, memory: Memory):
-        """Process a command in the main thread."""
+            if event.kind == TranscriptKind.FINAL:
+                text = event.text.strip()
+                if not text:
+                    continue
+
+                # Show final transcript
+                console.print(f"\r  [bold green]You:[/] [white]{text}[/]" + " " * 20)
+
+                # Check wake word
+                has_wake, remaining = wake_detector.check(text)
+
+                if has_wake:
+                    wake_detector.consume_wake()
+                    if remaining:
+                        # Command after wake word — process it
+                        console.print(f"  [bold cyan]Command:[/] {remaining}")
+                        console.print("  [dim]Sending command to AI...[/]")
+                        _process_in_thread(remaining, memory)
+                    else:
+                        # Wake word only — acknowledge
+                        console.print("  [bold yellow]Listening for command...[/]")
+                        try:
+                            from voice.speaker import speak
+                            speak("Yes, Sir?")
+                        except Exception:
+                            pass
+                elif wake_detector.is_wake_active:
+                    # Command after wake (split utterance)
+                    wake_detector.consume_wake()
+                    console.print(f"  [bold cyan]Command:[/] {text}")
+                    console.print("  [dim]Sending command to AI...[/]")
+                    _process_in_thread(text, memory)
+                else:
+                    # No wake word — ignore
+                    if debug:
+                        logger.debug("Ignoring (no wake word): %s", text[:40])
+
+            # Speak startup message once after first successful connection
+            if not startup_spoken and event.kind in (TranscriptKind.PARTIAL, TranscriptKind.FINAL):
+                startup_spoken = True
+                try:
+                    from voice.speaker import speak
+                    speak("Nova is alive.")
+                except Exception:
+                    pass
+
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error("AWS voice mode error: %s", e, exc_info=True)
+        console.print(f"  [red]Fatal error: {e}[/]")
+    finally:
+        console.print("  [dim]Stopping microphone...[/]")
+        await provider.stop()
+        console.print("  [dim]Stopping Amazon Transcribe...[/]")
+        console.print("  [dim]AWS voice mode stopped.[/]")
+        console.print("  [dim]Goodbye.[/]")
+
+
+def _process_in_thread(text: str, memory: Memory) -> None:
+    """Process a command in a background thread to avoid blocking the event loop."""
+    import threading
+
+    def _run():
         try:
             process_command(text, memory, speak_response=True)
         except Exception as e:
             logger.error("Command processing failed: %s", e)
 
-    # Start AWS listener in background
-    listener_thread = threading.Thread(target=aws_listener, daemon=True, name="aws-stt")
-    listener_thread.start()
-
-    # Start API server (for REST endpoints and potential web UI)
-    try:
-        start_server()
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-    finally:
-        provider.stop()
+    thread = threading.Thread(target=_run, daemon=True, name="cmd-processor")
+    thread.start()
 
 
 # ─── Entry Point ─────────────────────────────────────────────────────
@@ -383,7 +404,8 @@ def main():
     parser.add_argument("--text", action="store_true", help="Run in text-only mode (keyboard input)")
     parser.add_argument("--web", action="store_true", help="Run web UI with browser-based STT (default)")
     parser.add_argument("--api", action="store_true", help="Start API server only (REST endpoints)")
-    parser.add_argument("--aws", action="store_true", help="Use Amazon Transcribe Streaming (server-side STT)")
+    parser.add_argument("--aws", action="store_true", help="Use Amazon Transcribe Streaming (headless voice mode)")
+    parser.add_argument("--aws-live", action="store_true", help="Use Amazon Transcribe with WebRTC (best audio quality)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
 
@@ -392,7 +414,8 @@ def main():
         setup_debug_logging()
 
     logger.info("Starting AI Laptop Handler (Nova)...")
-    logger.info("STT Provider: %s", "aws" if args.aws else config.STT_PROVIDER)
+    stt_mode = "aws-live" if args.aws_live else ("aws" if args.aws else config.STT_PROVIDER)
+    logger.info("STT Provider: %s", stt_mode)
 
     if args.api:
         from api.server import start_server
@@ -404,8 +427,19 @@ def main():
         run_text_mode(memory)
         return
 
-    # Default mode is Web Mode (with optional AWS)
-    run_web_mode(aws_mode=args.aws, debug=args.debug)
+    if args.aws or args.aws_live:
+        # Headless AWS voice mode — no browser, no web server
+        try:
+            asyncio.run(run_aws_voice_mode(
+                use_webrtc=args.aws_live,
+                debug=args.debug,
+            ))
+        except KeyboardInterrupt:
+            console.print("\n  [dim]Goodbye.[/]")
+        return
+
+    # Default: Web mode
+    run_web_mode()
 
 
 if __name__ == "__main__":

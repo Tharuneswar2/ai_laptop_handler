@@ -25,9 +25,12 @@ Pillow>=10.0.0
 # Environment variables
 python-dotenv>=1.0.0
 
-# ─── AWS Transcribe Streaming (optional, for --aws mode) ───
-# aiobotocore>=2.9.0
-# botocore>=1.31.0
-# pyaudio>=0.2.13
-# torch>=2.0.0  (optional, for Silero VAD)
+# ─── AWS Transcribe (for --aws mode) ───
+# amazon-transcribe-sdk>=1.0.0
+# sounddevice>=0.4.6
+
+# ─── AWS Transcribe + WebRTC (for --aws-live mode) ───
+# amazon-transcribe-sdk>=1.0.0
+# aiortc>=1.6.0
+# av>=10.0.0
 
