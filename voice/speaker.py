@@ -61,16 +61,40 @@ def speak(text: str) -> None:
     """
     Speak the given text aloud.
 
-    Tries pyttsx3 first, and falls back to native OS speech tools
-    (spd-say/espeak on Linux, say on macOS, PowerShell SAPI on Windows)
-    if pyttsx3 is not installed or unavailable.
+    On Windows, uses PowerShell System.Speech in a subprocess (base voice),
+    which is reliable from any thread. Falls back to pyttsx3 and then
+    native OS speech tools on other platforms.
     """
     if not text:
         return
 
     text_clean = text.replace("*", "").replace("`", "").strip()
+    if not text_clean:
+        return
 
-    # 1. Try pyttsx3 engine
+    # 1. Windows: PowerShell System.Speech subprocess (base/default voice)
+    if sys.platform == "win32":
+        try:
+            import subprocess
+            logger.info("Speaking (PowerShell SAPI): '%s'", text_clean[:80])
+            safe_text = text_clean.replace("'", "''")
+            ps_script = (
+                "Add-Type -AssemblyName System.Speech; "
+                "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "$s.Rate = 2; "
+                f"$s.Speak('{safe_text}'); "
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                check=False,
+                timeout=30,
+            )
+            logger.debug("Speech complete.")
+            return
+        except Exception as exc:
+            logger.warning("PowerShell SAPI TTS failed: %s", exc)
+
+    # 2. Try pyttsx3 engine
     try:
         engine = _get_thread_engine()
         if engine is not None:
@@ -82,7 +106,7 @@ def speak(text: str) -> None:
     except Exception as e:
         logger.debug("pyttsx3 TTS unavailable (%s), trying native OS fallback...", e)
 
-    # 2. System fallbacks (Linux: spd-say / espeak, macOS: say, Windows: PowerShell)
+    # 3. Other platform fallbacks (Linux: spd-say / espeak, macOS: say)
     import shutil
     import subprocess
 
@@ -117,16 +141,6 @@ def speak(text: str) -> None:
                 return
             except Exception as exc:
                 logger.warning("macOS say failed: %s", exc)
-
-    elif sys.platform == "win32":
-        try:
-            logger.info("Speaking (PowerShell SAPI): '%s'", text_clean[:80])
-            safe_text = text_clean.replace('"', '')
-            ps_script = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{safe_text}")'
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], check=False)
-            return
-        except Exception as exc:
-            logger.warning("Windows PowerShell TTS failed: %s", exc)
 
     logger.warning("No working TTS engine available for text: %s", text_clean)
 
