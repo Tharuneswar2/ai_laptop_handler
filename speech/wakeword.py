@@ -56,8 +56,9 @@ class WakeWordDetector:
         # Check each wake word
         for wake in self.wake_words:
             if wake in text_lower:
-                # Remove wake word from text
+                # Remove wake word from text and clean up leading punctuation
                 remaining = re.sub(re.escape(wake), "", text, flags=re.IGNORECASE).strip()
+                remaining = re.sub(r"^[,\s:!.\-]+", "", remaining).strip()
                 self._wake_active = True
                 logger.info("Wake word detected: '%s'", wake)
                 return True, remaining
